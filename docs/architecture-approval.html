@@ -113,7 +113,8 @@
   <h2><span class="num">1</span> Executive Summary</h2>
   <p>
     A Spring Boot starter library that auto-migrates versioned JSON stored in database columns
-    from any old version to the latest schema on read, and validates JSON structure before writes.
+    from any old version to the latest schema on read, validates JSON structure on reads and writes,
+    validates version correctness before saving, and optionally returns typed POJOs instead of raw JSON.
     Eliminates batch migration scripts, downtime, and <code>if/else</code> version handling in application code.
   </p>
 
@@ -123,9 +124,22 @@
     <tr><td>Language</td><td>Java 17+</td></tr>
     <tr><td>Framework</td><td>Spring Boot 3.x (optional — works standalone)</td></tr>
     <tr><td>Core Dependency</td><td>JsonPath 2.9+ (json-path by Jayway)</td></tr>
-    <tr><td>Test Coverage</td><td>58 unit tests</td></tr>
+    <tr><td>Test Coverage</td><td>79 unit tests</td></tr>
     <tr><td>License</td><td>MIT</td></tr>
     <tr><td>GitHub</td><td><code>github.com/ashish-v7-7/json-version-migrator</code></td></tr>
+  </table>
+
+  <h3>Key Capabilities</h3>
+  <table>
+    <thead><tr><th>Capability</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td>Chain Migration</td><td>v1→v2→v3→...→latest. Each step is a single <code>@Component</code> class.</td></tr>
+      <tr><td>Schema Validation</td><td>Define required / optional / forbidden fields per version with type checking.</td></tr>
+      <tr><td>Input Version Validation</td><td><code>validateInput()</code> rejects missing, unparseable, unknown, or old versions on writes.</td></tr>
+      <tr><td>Per-Version Schema Validation</td><td><code>validateInputAnyVersion()</code> validates against the schema matching the declared version.</td></tr>
+      <tr><td>Typed POJO Return</td><td><code>migrateToLatest(type, json, deserializer)</code> returns a deserialized POJO instead of raw JSON.</td></tr>
+      <tr><td>Fail-Fast Startup</td><td>Broken migration chains or duplicate schemas = app refuses to start.</td></tr>
+    </tbody>
   </table>
 
   <!-- ===== PROBLEM STATEMENT ===== -->
@@ -190,7 +204,7 @@
 
       <!-- ===== READ PATH (top half) ===== -->
       <rect x="20" y="15" width="920" height="250" rx="12" fill="rgba(63,185,80,0.03)" stroke="#3fb950" stroke-width="1" stroke-dasharray="6,4"/>
-      <text x="40" y="38" fill="#3fb950" font-size="12" font-weight="700" letter-spacing="1">READ PATH — migrateAndValidate()</text>
+      <text x="40" y="38" fill="#3fb950" font-size="12" font-weight="700" letter-spacing="1">READ PATH — migrateToLatest() / migrateAndValidate() / migrateValidateOrThrow()</text>
 
       <!-- DB -->
       <rect x="40" y="60" width="110" height="70" rx="8" fill="#1c2129" stroke="#d29922" stroke-width="2"/>
@@ -233,11 +247,15 @@
       <text x="768" y="88" text-anchor="middle" fill="#39d2c0" font-size="11" font-weight="600">Validate</text>
       <text x="768" y="106" text-anchor="middle" fill="#8b949e" font-size="9">schema rules</text>
 
-      <!-- Valid → DTO -->
-      <line x1="825" y1="80" x2="870" y2="80" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
-      <text x="848" y="72" fill="#3fb950" font-size="8">pass</text>
-      <rect x="870" y="60" width="70" height="40" rx="6" fill="#1c2129" stroke="#3fb950" stroke-width="2"/>
-      <text x="905" y="85" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="700">DTO</text>
+      <!-- Valid → Deserialize -->
+      <line x1="825" y1="80" x2="850" y2="80" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="838" y="72" fill="#3fb950" font-size="7">pass</text>
+
+      <!-- Deserialize (optional) -->
+      <rect x="850" y="62" width="95" height="50" rx="6" fill="#1c2129" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="898" y="82" text-anchor="middle" fill="#58a6ff" font-size="9" font-weight="600">Deserialize</text>
+      <text x="898" y="96" text-anchor="middle" fill="#8b949e" font-size="8">JsonDeserializer&lt;T&gt;</text>
+      <text x="898" y="107" text-anchor="middle" fill="#8b949e" font-size="7">(optional)</text>
 
       <!-- Invalid → handle -->
       <line x1="768" y1="123" x2="768" y2="155" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
@@ -246,17 +264,17 @@
       <text x="768" y="177" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">Log + Handle</text>
 
       <!-- Subtext -->
-      <text x="480" y="152" text-anchor="middle" fill="#8b949e" font-size="10">Each migration step: @Component class with applyChanges(doc)</text>
-      <text x="480" y="168" text-anchor="middle" fill="#8b949e" font-size="10">Original DB row is NEVER modified (read-only migration)</text>
+      <text x="480" y="152" text-anchor="middle" fill="#8b949e" font-size="10">Each migration step: @Component class with applyChanges(doc). DB row is NEVER modified.</text>
+      <text x="480" y="168" text-anchor="middle" fill="#8b949e" font-size="10">Returns String (raw JSON) or typed POJO via JsonDeserializer&lt;T&gt;</text>
 
       <!-- Read path notes -->
       <rect x="40" y="195" width="880" height="55" rx="6" fill="#21262d" stroke="#30363d"/>
       <text x="55" y="215" fill="#3fb950" font-size="11" font-weight="600">Read Path Guarantees:</text>
-      <text x="55" y="233" fill="#8b949e" font-size="10">1. Old data auto-migrates on read (zero downtime)  2. DB never written (in-memory only)  3. Schema validated before DTO deserialization  4. Latest-version JSON every time</text>
+      <text x="55" y="233" fill="#8b949e" font-size="10">1. Auto-migrate on read (zero downtime)  2. DB never written  3. Schema validated  4. Returns String or POJO (TypedMigrationResult&lt;T&gt;)</text>
 
       <!-- ===== WRITE PATH (bottom half) ===== -->
       <rect x="20" y="280" width="920" height="280" rx="12" fill="rgba(210,153,34,0.03)" stroke="#d29922" stroke-width="1" stroke-dasharray="6,4"/>
-      <text x="40" y="303" fill="#d29922" font-size="12" font-weight="700" letter-spacing="1">WRITE PATH — validateInput()</text>
+      <text x="40" y="303" fill="#d29922" font-size="12" font-weight="700" letter-spacing="1">WRITE PATH — validateInput() / validateInputAnyVersion()</text>
 
       <!-- API input -->
       <rect x="40" y="325" width="110" height="55" rx="8" fill="#1c2129" stroke="#d29922" stroke-width="2"/>
@@ -298,21 +316,22 @@
 
       <line x1="655" y1="352" x2="685" y2="352" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
 
-      <!-- Step 4: is latest -->
-      <polygon points="740,352 780,325 820,352 780,379" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
-      <text x="780" y="349" text-anchor="middle" fill="#e3b341" font-size="8" font-weight="600">==</text>
-      <text x="780" y="361" text-anchor="middle" fill="#e3b341" font-size="8" font-weight="600">latest?</text>
+      <!-- Step 4: has schema? / is latest? -->
+      <polygon points="740,352 790,320 840,352 790,384" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="790" y="346" text-anchor="middle" fill="#e3b341" font-size="7" font-weight="600">schema for</text>
+      <text x="790" y="357" text-anchor="middle" fill="#e3b341" font-size="7" font-weight="600">version?</text>
+      <text x="790" y="370" text-anchor="middle" fill="#8b949e" font-size="6">(latest or any)</text>
 
-      <line x1="780" y1="379" x2="780" y2="405" stroke="#f85149" stroke-width="1" marker-end="url(#ar)"/>
-      <rect x="718" y="405" width="124" height="22" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
-      <text x="780" y="420" text-anchor="middle" fill="#f85149" font-size="8" font-weight="600">VERSION_NOT_LATEST</text>
+      <line x1="790" y1="384" x2="790" y2="410" stroke="#f85149" stroke-width="1" marker-end="url(#ar)"/>
+      <rect x="718" y="410" width="144" height="22" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="790" y="425" text-anchor="middle" fill="#f85149" font-size="7" font-weight="600">NO_SCHEMA / NOT_LATEST</text>
 
-      <line x1="820" y1="352" x2="855" y2="352" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <line x1="840" y1="352" x2="860" y2="352" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
 
       <!-- Schema validate -->
-      <rect x="855" y="332" width="75" height="40" rx="6" fill="#1c2129" stroke="#39d2c0" stroke-width="1.5"/>
-      <text x="893" y="349" text-anchor="middle" fill="#39d2c0" font-size="9" font-weight="600">Schema</text>
-      <text x="893" y="363" text-anchor="middle" fill="#39d2c0" font-size="9" font-weight="600">Rules</text>
+      <rect x="860" y="332" width="75" height="40" rx="6" fill="#1c2129" stroke="#39d2c0" stroke-width="1.5"/>
+      <text x="898" y="349" text-anchor="middle" fill="#39d2c0" font-size="9" font-weight="600">Schema</text>
+      <text x="898" y="363" text-anchor="middle" fill="#39d2c0" font-size="9" font-weight="600">Rules</text>
 
       <!-- Save -->
       <line x1="893" y1="372" x2="893" y2="450" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
@@ -321,9 +340,10 @@
       <text x="893" y="475" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="700">Save DB</text>
 
       <!-- Write path notes -->
-      <rect x="40" y="495" width="790" height="50" rx="6" fill="#21262d" stroke="#30363d"/>
-      <text x="55" y="515" fill="#d29922" font-size="11" font-weight="600">Write Path Guarantees:</text>
-      <text x="55" y="533" fill="#8b949e" font-size="10">1. Version field must exist  2. Must be parseable integer  3. Cannot be future/unknown version  4. Must be latest version  5. Structure must match schema</text>
+      <rect x="40" y="495" width="890" height="55" rx="6" fill="#21262d" stroke="#30363d"/>
+      <text x="55" y="513" fill="#d29922" font-size="11" font-weight="600">Write Path Guarantees:</text>
+      <text x="55" y="529" fill="#8b949e" font-size="10">validateInput(): version must exist + parseable + known + LATEST + structure matches schema</text>
+      <text x="55" y="543" fill="#8b949e" font-size="10">validateInputAnyVersion(): version must exist + parseable + known + SCHEMA EXISTS for that version + structure matches</text>
     </svg>
   </div>
 
@@ -502,8 +522,18 @@
   </div>
 
   <div class="info decision">
-    <strong>Decision 5: Write-path rejects non-latest versions</strong>
-    <code>validateInput()</code> requires JSON being saved to declare the latest version. Old-version writes are rejected. This ensures the database doesn't accumulate new old-format data after the migration chain is deployed.
+    <strong>Decision 5: Two write-path modes — strict latest vs any version with schema</strong>
+    <code>validateInput()</code> requires the latest version (strict). <code>validateInputAnyVersion()</code> accepts any version that has a registered schema (flexible). Use strict for APIs that should only accept latest, flexible for services that accept multiple versions during gradual rollouts.
+  </div>
+
+  <div class="info decision">
+    <strong>Decision 6: Typed POJO return is optional (via JsonDeserializer&lt;T&gt;)</strong>
+    All migration methods return <code>String</code> by default. Pass a <code>JsonDeserializer&lt;T&gt;</code> to get a typed POJO back. The library has zero Jackson dependency — you provide the deserialization function. A <code>JacksonDeserializer</code> helper is included for convenience.
+  </div>
+
+  <div class="info decision">
+    <strong>Decision 7: Per-version schemas enable multi-version validation</strong>
+    You can register schemas for every version (V1Schema, V2Schema, V3Schema, etc.) — not just the latest. <code>validateInputAnyVersion()</code> reads the declared version from JSON, finds the matching schema, and validates against it. This enables validating old-format data without forcing migration first.
   </div>
 
   <!-- ===== BENEFITS ===== -->
@@ -527,6 +557,24 @@
   <div class="info benefit">
     <strong>Audit Trail</strong>
     Each migration class is a self-documenting record of what changed and why. Git blame shows who changed what.
+  </div>
+
+  <div class="info benefit">
+    <strong>Typed POJO Return</strong>
+    One call: migrate + validate + deserialize → typed DTO. No manual <code>objectMapper.readValue()</code> step.
+    <code>TypedMigrationResult&lt;T&gt;</code> gives you both the POJO and validation result.
+  </div>
+
+  <div class="info benefit">
+    <strong>Multi-Version Input Validation</strong>
+    Define schemas for all versions. <code>validateInputAnyVersion()</code> validates JSON at whatever version it declares.
+    Catches wrong structure even for old-format data without requiring migration first.
+  </div>
+
+  <div class="info benefit">
+    <strong>Framework-Agnostic Deserialization</strong>
+    <code>JsonDeserializer&lt;T&gt;</code> is a simple functional interface. Works with Jackson, Gson, or any JSON library.
+    No compile-time dependency on any serialization framework.
   </div>
 
   <!-- ===== RISKS ===== -->
@@ -572,15 +620,30 @@
       <tr><td>Add Maven dependency</td><td>5 min</td><td>pom.xml</td></tr>
       <tr><td>Create <code>JsonTypes.java</code> constants</td><td>5 min</td><td>1 new file</td></tr>
       <tr><td>Write migration classes (per type)</td><td>15 min/type</td><td>N files (1 per version step)</td></tr>
-      <tr><td>Write schema definition (per type)</td><td>10 min/type</td><td>1 file per type</td></tr>
-      <tr><td>Wire <code>migrateToLatest()</code> into services</td><td>5 min/service</td><td>1 line change per read path</td></tr>
+      <tr><td>Write schema definitions (all versions per type)</td><td>10 min/version</td><td>1 file per (type, version) in <code>schema/</code> package</td></tr>
+      <tr><td>Wire <code>migrateToLatest(type, json, deser)</code> into read paths</td><td>5 min/service</td><td>1 line change — returns POJO directly</td></tr>
       <tr><td>Wire <code>validateInputOrThrow()</code> into write paths</td><td>5 min/service</td><td>1 line change per write path</td></tr>
+      <tr><td>Wire <code>validateInputAnyVersionOrThrow()</code> for multi-version writes</td><td>5 min/service</td><td>1 line change per write path (alternative to above)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Example: Schema package layout</h3>
+  <table>
+    <thead><tr><th>Path</th><th>What</th></tr></thead>
+    <tbody>
+      <tr><td><code>migration/JsonTypes.java</code></td><td>String constants: <code>CREDENTIAL</code>, <code>BRANDING_CONFIG</code></td></tr>
+      <tr><td><code>migration/credential/CredentialV1ToV2.java</code></td><td>Migration: add gateway_mode</td></tr>
+      <tr><td><code>migration/credential/CredentialV2ToV3.java</code></td><td>Migration: rename key_id → api_key_id</td></tr>
+      <tr><td><code>migration/schema/credential/CredentialV1Schema.java</code></td><td>Schema: key_id, key_secret (v1 rules)</td></tr>
+      <tr><td><code>migration/schema/credential/CredentialV2Schema.java</code></td><td>Schema: + gateway_mode (v2 rules)</td></tr>
+      <tr><td><code>migration/schema/credential/CredentialV3Schema.java</code></td><td>Schema: api_key_id, forbidden key_id (v3 rules)</td></tr>
+      <tr><td><code>migration/schema/branding/BrandingV1Schema.java</code></td><td>Schema: logo, theme, name (v1 rules)</td></tr>
     </tbody>
   </table>
 
   <div class="info benefit">
-    <strong>Total for a typical service with 2 JSON types, 4 versions each:</strong>
-    ~2 hours to fully integrate (including tests).
+    <strong>Total for a typical service with 2 JSON types, 3 versions each:</strong>
+    ~2 hours to fully integrate (migrations + schemas + service wiring + tests).
   </div>
 
   <hr>
