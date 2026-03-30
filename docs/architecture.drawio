@@ -1,0 +1,344 @@
+<mxfile host="app.diagrams.net" agent="json-version-migrator" version="24.0.0">
+  <diagram id="arch" name="System Overview">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ════════════════════════════════════════ -->
+        <!-- TITLE -->
+        <!-- ════════════════════════════════════════ -->
+        <mxCell id="title" value="&lt;b&gt;JSON Version Migrator — System Architecture&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#999&quot;&gt;Read Path (green) &amp; Write Path (orange) &amp; Startup (blue)&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="400" y="10" width="500" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ════════════════════════════════════════ -->
+        <!-- READ PATH GROUP -->
+        <!-- ════════════════════════════════════════ -->
+        <mxCell id="read-group" value="&lt;b&gt;READ PATH&lt;/b&gt; — migrateToLatest() / migrateAndValidate()" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=8;fontStyle=1;fontSize=12;horizontal=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="1220" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- DB -->
+        <mxCell id="db" value="&lt;b&gt;Database&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#666&quot; size=&quot;1&quot;&gt;v1 / v2 / v3 / v4&lt;br&gt;JSON column&lt;/font&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="read-group">
+          <mxGeometry x="30" y="50" width="100" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: DB → Parse -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="read-group" source="db" target="parse">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1-label" value="read" style="edgeLabel;html=1;fontSize=10;fontColor=#82b366;" vertex="1" connectable="0" parent="e1">
+          <mxGeometry x="-0.2" relative="1" as="geometry"><mxPoint as="offset"/></mxGeometry>
+        </mxCell>
+
+        <!-- Parse -->
+        <mxCell id="parse" value="&lt;b&gt;Parse JSON&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;Read $.version&lt;br&gt;e.g. → 1&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="read-group">
+          <mxGeometry x="180" y="55" width="110" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: Parse → Decision -->
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1.5;" edge="1" parent="read-group" source="parse" target="dec1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Decision: needs migration? -->
+        <mxCell id="dec1" value="version&lt;br&gt;&amp;lt; latest?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="read-group">
+          <mxGeometry x="340" y="50" width="100" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- No → skip -->
+        <mxCell id="e3" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=0.5;exitY=0;entryX=0;entryY=0.5;fontColor=#999;fontSize=10;" edge="1" parent="read-group" source="dec1" target="deserialize">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="390" y="40"/><mxPoint x="870" y="40"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Yes → Migrate -->
+        <mxCell id="e4" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;fontColor=#82b366;fontSize=10;" edge="1" parent="read-group" source="dec1" target="migrate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Migration Chain -->
+        <mxCell id="migrate" value="&lt;b&gt;Migration Chain&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;V1→V2 → V2→V3 → V3→V4&lt;br&gt;Each step: @Component class&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="read-group">
+          <mxGeometry x="500" y="50" width="170" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: Migrate → Validate -->
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="read-group" source="migrate" target="validate-read">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Validate -->
+        <mxCell id="validate-read" value="&lt;b&gt;Validate&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;Schema rules check&lt;br&gt;(opt-in)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="read-group">
+          <mxGeometry x="720" y="55" width="110" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: Validate → Deserialize -->
+        <mxCell id="e6" value="pass" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;fontColor=#82b366;fontSize=10;" edge="1" parent="read-group" source="validate-read" target="deserialize">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Deserialize -->
+        <mxCell id="deserialize" value="&lt;b&gt;Deserialize&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;JsonDeserializer&amp;lt;T&amp;gt;&lt;br&gt;JSON → POJO&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="read-group">
+          <mxGeometry x="870" y="55" width="110" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: Deserialize → DTO -->
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="read-group" source="deserialize" target="dto">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- DTO -->
+        <mxCell id="dto" value="&lt;b&gt;DTO / POJO&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;Latest version&lt;br&gt;Ready to use&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="read-group">
+          <mxGeometry x="1030" y="55" width="100" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Validation fail -->
+        <mxCell id="e8" value="fail" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;" edge="1" parent="read-group" source="validate-read" target="read-error">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="read-error" value="&lt;font color=&quot;#b85450&quot;&gt;&lt;b&gt;Log + Handle&lt;/b&gt;&lt;br&gt;or throw&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="read-group">
+          <mxGeometry x="720" y="150" width="110" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- Read path note -->
+        <mxCell id="read-note" value="&lt;font color=&quot;#666&quot;&gt;DB row is NEVER modified. Migration happens in memory only. Returns String or typed POJO.&lt;/font&gt;" style="text;html=1;align=left;fontSize=10;" vertex="1" parent="read-group">
+          <mxGeometry x="30" y="155" width="500" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- ════════════════════════════════════════ -->
+        <!-- WRITE PATH GROUP -->
+        <!-- ════════════════════════════════════════ -->
+        <mxCell id="write-group" value="&lt;b&gt;WRITE PATH&lt;/b&gt; — validateInput() / validateInputAnyVersion()" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;arcSize=8;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="1220" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- API Input -->
+        <mxCell id="api-input" value="&lt;b&gt;API Input&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;New JSON&lt;br&gt;from client&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="write-group">
+          <mxGeometry x="30" y="50" width="100" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d6b656;strokeWidth=2;" edge="1" parent="write-group" source="api-input" target="w-ver-exists">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 1: version exists -->
+        <mxCell id="w-ver-exists" value="$.version&lt;br&gt;exists?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="write-group">
+          <mxGeometry x="175" y="45" width="90" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="w1-fail" value="&lt;font color=&quot;#b85450&quot; size=&quot;1&quot;&gt;VERSION&lt;br&gt;MISSING&lt;/font&gt;" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="write-group">
+          <mxGeometry x="180" y="145" width="80" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="w1f" value="no" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontColor=#b85450;fontSize=9;" edge="1" parent="write-group" source="w-ver-exists" target="w1-fail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w2" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=1.5;fontColor=#82b366;fontSize=9;" edge="1" parent="write-group" source="w-ver-exists" target="w-parseable">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 2: parseable -->
+        <mxCell id="w-parseable" value="parse-&lt;br&gt;able?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="write-group">
+          <mxGeometry x="310" y="45" width="90" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="w2-fail" value="&lt;font color=&quot;#b85450&quot; size=&quot;1&quot;&gt;VERSION&lt;br&gt;UNPARSEABLE&lt;/font&gt;" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="write-group">
+          <mxGeometry x="315" y="145" width="80" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="w2f" value="no" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontColor=#b85450;fontSize=9;" edge="1" parent="write-group" source="w-parseable" target="w2-fail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w3" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=1.5;fontColor=#82b366;fontSize=9;" edge="1" parent="write-group" source="w-parseable" target="w-known">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 3: known -->
+        <mxCell id="w-known" value="&amp;lt;=&lt;br&gt;latest?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="write-group">
+          <mxGeometry x="445" y="45" width="90" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="w3-fail" value="&lt;font color=&quot;#b85450&quot; size=&quot;1&quot;&gt;VERSION&lt;br&gt;UNKNOWN&lt;/font&gt;" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="write-group">
+          <mxGeometry x="450" y="145" width="80" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="w3f" value="no" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontColor=#b85450;fontSize=9;" edge="1" parent="write-group" source="w-known" target="w3-fail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w4" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=1.5;fontColor=#82b366;fontSize=9;" edge="1" parent="write-group" source="w-known" target="w-schema">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 4: schema exists -->
+        <mxCell id="w-schema" value="schema&lt;br&gt;found?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="write-group">
+          <mxGeometry x="580" y="45" width="90" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="w4-fail" value="&lt;font color=&quot;#b85450&quot; size=&quot;1&quot;&gt;NO_SCHEMA&lt;br&gt;FOUND&lt;/font&gt;" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="write-group">
+          <mxGeometry x="585" y="145" width="80" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="w4f" value="no" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontColor=#b85450;fontSize=9;" edge="1" parent="write-group" source="w-schema" target="w4-fail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w5" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=1.5;fontColor=#82b366;fontSize=9;" edge="1" parent="write-group" source="w-schema" target="w-rules">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 5: validate rules -->
+        <mxCell id="w-rules" value="&lt;b&gt;Schema Rules&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;required / optional&lt;br&gt;forbidden / type check&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="write-group">
+          <mxGeometry x="730" y="50" width="130" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="w6" value="pass" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;fontColor=#82b366;fontSize=10;" edge="1" parent="write-group" source="w-rules" target="save-db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Save DB -->
+        <mxCell id="save-db" value="&lt;b&gt;Save to DB&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;repository.save()&lt;/font&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="write-group">
+          <mxGeometry x="920" y="45" width="100" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Rules fail -->
+        <mxCell id="w6f" value="fail" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontColor=#b85450;fontSize=9;" edge="1" parent="write-group" source="w-rules" target="w-rules-fail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="w-rules-fail" value="&lt;font color=&quot;#b85450&quot; size=&quot;1&quot;&gt;FIELD ERRORS&lt;br&gt;missing / type / forbidden&lt;/font&gt;" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="write-group">
+          <mxGeometry x="730" y="145" width="130" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- ════════════════════════════════════════ -->
+        <!-- COMPONENT MAP GROUP -->
+        <!-- ════════════════════════════════════════ -->
+        <mxCell id="comp-group" value="&lt;b&gt;COMPONENT MAP&lt;/b&gt; — Library (blue) vs Your Code (green)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;rounded=1;arcSize=8;fontStyle=1;fontSize=12;fontColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="1220" height="480" as="geometry"/>
+        </mxCell>
+
+        <!-- Library subgroup -->
+        <mxCell id="lib-label" value="&lt;b&gt;LIBRARY&lt;/b&gt; (auto-configured, zero config)" style="text;html=1;fontSize=11;fontColor=#6c8ebf;" vertex="1" parent="comp-group">
+          <mxGeometry x="20" y="35" width="250" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- JsonMigrationService -->
+        <mxCell id="c-svc" value="&lt;b&gt;JsonMigrationService&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;migrateToLatest(type, json)&lt;br&gt;migrateToLatest(type, json, deserializer) → T&lt;br&gt;migrateAndValidate(type, json)&lt;br&gt;migrateAndValidate(type, json, deser) → TypedResult&amp;lt;T&amp;gt;&lt;br&gt;migrateValidateOrThrow(type, json)&lt;br&gt;migrateValidateOrThrow(type, json, deser) → T&lt;br&gt;needsMigration(type, json)&lt;br&gt;getCurrentVersion(json)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="20" y="60" width="320" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- JsonValidationService -->
+        <mxCell id="c-val" value="&lt;b&gt;JsonValidationService&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;validate(type, json) — read path&lt;br&gt;validateOrThrow(type, json)&lt;br&gt;validateInput(type, json) — write (latest only)&lt;br&gt;validateInputOrThrow(type, json)&lt;br&gt;validateInputAnyVersion(type, json) — write (any)&lt;br&gt;validateInputAnyVersionOrThrow(type, json)&lt;br&gt;validateInputForVersion(type, expected, json)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="360" y="60" width="310" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrow: Service → Validation -->
+        <mxCell id="ce1" value="uses" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;fontSize=9;fontColor=#6c8ebf;dashed=1;" edge="1" parent="comp-group" source="c-svc" target="c-val">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- MigrationRegistry -->
+        <mxCell id="c-mreg" value="&lt;b&gt;JsonMigrationRegistry&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;init() — index + validate chain&lt;br&gt;getLatestVersion(type)&lt;br&gt;getMigrationChain(type, from)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="20" y="240" width="250" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- SchemaRegistry -->
+        <mxCell id="c-sreg" value="&lt;b&gt;JsonSchemaRegistry&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;init() — index + check duplicates&lt;br&gt;getSchema(type, version)&lt;br&gt;getLatestSchema(type)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="360" y="240" width="250" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows: Services → Registries -->
+        <mxCell id="ce2" value="queries" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#9673a6;dashed=1;fontSize=9;fontColor=#9673a6;" edge="1" parent="comp-group" source="c-svc" target="c-mreg">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ce3" value="queries" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#9673a6;dashed=1;fontSize=9;fontColor=#9673a6;" edge="1" parent="comp-group" source="c-val" target="c-sreg">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Interface: JsonVersionMigration -->
+        <mxCell id="c-mig-iface" value="&lt;b&gt;«interface»&lt;br&gt;JsonVersionMigration&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;jsonType() | fromVersion()&lt;br&gt;toVersion() | migrate(doc)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=center;verticalAlign=top;spacingTop=2;dashed=1;" vertex="1" parent="comp-group">
+          <mxGeometry x="20" y="350" width="180" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Abstract base -->
+        <mxCell id="c-abs" value="&lt;b&gt;AbstractJsonVersion&lt;br&gt;Migration&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;applyChanges(doc)&lt;br&gt;auto-updates $.version&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=center;verticalAlign=top;spacingTop=2;dashed=1;" vertex="1" parent="comp-group">
+          <mxGeometry x="220" y="350" width="150" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Interface: JsonSchemaDefinition -->
+        <mxCell id="c-schema-iface" value="&lt;b&gt;«interface»&lt;br&gt;JsonSchemaDefinition&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;jsonType() | version()&lt;br&gt;rules() → List&amp;lt;JsonFieldRule&amp;gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=center;verticalAlign=top;spacingTop=2;dashed=1;" vertex="1" parent="comp-group">
+          <mxGeometry x="400" y="350" width="190" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- JsonFieldRule -->
+        <mxCell id="c-rule" value="&lt;b&gt;JsonFieldRule&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;required(path, type)&lt;br&gt;optional(path, type)&lt;br&gt;forbidden(path)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;align=center;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="610" y="350" width="140" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- JsonDeserializer -->
+        <mxCell id="c-deser" value="&lt;b&gt;JsonDeserializer&amp;lt;T&amp;gt;&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;T deserialize(String json)&lt;br&gt;Framework-agnostic&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;align=center;verticalAlign=top;spacingTop=2;dashed=1;" vertex="1" parent="comp-group">
+          <mxGeometry x="700" y="60" width="170" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- Results -->
+        <mxCell id="c-result" value="&lt;b&gt;Results&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;MigrationResult { json, validation }&lt;br&gt;TypedMigrationResult&amp;lt;T&amp;gt; { + value }&lt;br&gt;JsonValidationResult { errors, isValid }&lt;br&gt;JsonValidationError { code, path, msg }&lt;br&gt;JsonValidationException&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="700" y="145" width="260" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- ErrorCode enum -->
+        <mxCell id="c-errors" value="&lt;b&gt;ErrorCode (enum)&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;MISSING_REQUIRED_FIELD&lt;br&gt;TYPE_MISMATCH&lt;br&gt;FORBIDDEN_FIELD_PRESENT&lt;br&gt;NO_SCHEMA_FOUND&lt;br&gt;VERSION_MISSING&lt;br&gt;VERSION_UNPARSEABLE&lt;br&gt;VERSION_UNKNOWN&lt;br&gt;VERSION_NOT_LATEST&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="700" y="265" width="200" height="160" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows: Registry → Interface -->
+        <mxCell id="ce4" value="collects" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666;dashed=1;fontSize=9;fontColor=#666;" edge="1" parent="comp-group" source="c-mreg" target="c-mig-iface">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ce5" value="collects" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666;dashed=1;fontSize=9;fontColor=#666;" edge="1" parent="comp-group" source="c-sreg" target="c-schema-iface">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ce6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666;dashed=1;" edge="1" parent="comp-group" source="c-schema-iface" target="c-rule">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Your Code label -->
+        <mxCell id="your-label" value="&lt;b&gt;YOUR CODE&lt;/b&gt; (you write these)" style="text;html=1;fontSize=11;fontColor=#82b366;" vertex="1" parent="comp-group">
+          <mxGeometry x="980" y="35" width="200" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Your migrations -->
+        <mxCell id="c-your-mig" value="&lt;b&gt;Your Migrations&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;CredentialV1ToV2.java&lt;br&gt;CredentialV2ToV3.java&lt;br&gt;BrandingV1ToV2.java&lt;br&gt;... @Component classes&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="980" y="60" width="180" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Your schemas -->
+        <mxCell id="c-your-schema" value="&lt;b&gt;Your Schemas&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;CredentialV1Schema.java&lt;br&gt;CredentialV2Schema.java&lt;br&gt;CredentialV3Schema.java&lt;br&gt;BrandingV1Schema.java&lt;br&gt;... @Component classes&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="980" y="170" width="180" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Your service -->
+        <mxCell id="c-your-svc" value="&lt;b&gt;Your Service&lt;/b&gt;&lt;hr&gt;&lt;font size=&quot;1&quot;&gt;@Autowired JsonMigrationService&lt;br&gt;&lt;br&gt;// Read: migrate + deserialize&lt;br&gt;Cred c = svc.migrateToLatest(&lt;br&gt;  type, json, deserializer);&lt;br&gt;&lt;br&gt;// Write: validate input&lt;br&gt;valSvc.validateInputOrThrow(&lt;br&gt;  type, json);&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=2;" vertex="1" parent="comp-group">
+          <mxGeometry x="980" y="290" width="180" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows: Your code → Library -->
+        <mxCell id="ce7" value="extends" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;dashed=1;fontSize=9;fontColor=#82b366;" edge="1" parent="comp-group" source="c-your-mig" target="c-abs">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="950" y="105"/><mxPoint x="950" y="390"/><mxPoint x="370" y="390"/></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce8" value="implements" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;dashed=1;fontSize=9;fontColor=#82b366;" edge="1" parent="comp-group" source="c-your-schema" target="c-schema-iface">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="940" y="220"/><mxPoint x="940" y="390"/><mxPoint x="590" y="390"/></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce9" value="injects" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;fontSize=9;fontColor=#82b366;" edge="1" parent="comp-group" source="c-your-svc" target="c-svc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="960" y="365"/><mxPoint x="960" y="440"/><mxPoint x="10" y="440"/><mxPoint x="10" y="135"/></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AutoConfig -->
+        <mxCell id="c-autoconfig" value="&lt;b&gt;JsonMigratorAutoConfiguration&lt;/b&gt;&lt;br&gt;&lt;font size=&quot;1&quot; color=&quot;#666&quot;&gt;Spring Boot starter — creates all beans automatically&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;align=center;" vertex="1" parent="comp-group">
+          <mxGeometry x="180" y="148" width="280" height="40" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
