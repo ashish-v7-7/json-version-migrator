@@ -1,0 +1,268 @@
+// ============================================================
+// JSON Version Migrator — Architecture Diagram for dbdiagram.io
+// Paste this into https://dbdiagram.io/d to render
+// ============================================================
+
+// ──────────────────────────────────────────
+// PUBLIC API (what your service injects)
+// ──────────────────────────────────────────
+
+Table JsonMigrationService {
+  description "Main entry point — inject this into your services" [note: 'PUBLIC API']
+
+  migrateToLatest "String migrateToLatest(type, json)" [note: 'Read path: returns migrated JSON']
+  migrateToLatest_typed "T migrateToLatest(type, json, deserializer)" [note: 'Read path: returns POJO']
+  migrateAndValidate "MigrationResult migrateAndValidate(type, json)" [note: 'Read path: migrate + validate']
+  migrateAndValidate_typed "TypedMigrationResult<T> migrateAndValidate(type, json, deserializer)" [note: 'Read path: migrate + validate + POJO']
+  migrateValidateOrThrow "String migrateValidateOrThrow(type, json)" [note: 'Read path: throws if invalid']
+  migrateValidateOrThrow_typed "T migrateValidateOrThrow(type, json, deserializer)" [note: 'Read path: throws if invalid, returns POJO']
+  migrateToVersion "String migrateToVersion(type, json, target)" [note: 'Migrate to specific version']
+  needsMigration "boolean needsMigration(type, json)" [note: 'Check without migrating']
+  getCurrentVersion "int getCurrentVersion(json)" [note: 'Read $.version from JSON']
+}
+
+Table JsonValidationService {
+  description "Validation API — standalone or via MigrationService" [note: 'PUBLIC API']
+
+  validate "JsonValidationResult validate(type, json)" [note: 'Read path: validate against latest schema']
+  validate_version "JsonValidationResult validate(type, version, json)" [note: 'Validate against specific version schema']
+  validateOrThrow "void validateOrThrow(type, json)" [note: 'Throws JsonValidationException']
+  validateInput "JsonValidationResult validateInput(type, json)" [note: 'Write path: version must be latest']
+  validateInputOrThrow "void validateInputOrThrow(type, json)" [note: 'Write path: throws if not latest']
+  validateInputAnyVersion "JsonValidationResult validateInputAnyVersion(type, json)" [note: 'Write path: any version with schema']
+  validateInputAnyVersionOrThrow "void validateInputAnyVersionOrThrow(type, json)" [note: 'Write path: throws if no schema']
+  validateInputForVersion "JsonValidationResult validateInputForVersion(type, expected, json)" [note: 'Write path: must match exact version']
+}
+
+// ──────────────────────────────────────────
+// REGISTRIES (auto-discovery at startup)
+// ──────────────────────────────────────────
+
+Table JsonMigrationRegistry {
+  description "Collects migrations, validates chain, provides lookup" [note: 'STARTUP']
+
+  init "void init()" [note: 'Index + validate chain. Fails on gaps']
+  getLatestVersion "int getLatestVersion(type)" [note: 'Highest version for a type']
+  getMigrationChain "List getMigrationChain(type, from)" [note: 'Ordered steps: from → latest']
+  getRegisteredTypes "Set getRegisteredTypes()" [note: 'All types with migrations']
+}
+
+Table JsonSchemaRegistry {
+  description "Collects schemas, validates no duplicates" [note: 'STARTUP']
+
+  init "void init()" [note: 'Index schemas. Fails on duplicates']
+  getSchema "JsonSchemaDefinition getSchema(type, version)" [note: 'Exact version lookup']
+  getLatestSchema "JsonSchemaDefinition getLatestSchema(type)" [note: 'Highest version schema']
+  hasSchema "boolean hasSchema(type)" [note: 'Any schema registered?']
+}
+
+// ──────────────────────────────────────────
+// INTERFACES (you implement these)
+// ──────────────────────────────────────────
+
+Table JsonVersionMigration {
+  description "Interface: one migration step (v N → N+1)" [note: 'YOU IMPLEMENT']
+
+  jsonType "String — e.g. CREDENTIAL" [note: 'Which JSON family']
+  fromVersion "int — e.g. 1" [note: 'Source version']
+  toVersion "int — must be fromVersion + 1" [note: 'Target version']
+  migrate "void migrate(DocumentContext doc)" [note: 'Mutate JSON in-place']
+}
+
+Table AbstractJsonVersionMigration {
+  description "Base class: auto-updates $.version" [note: 'EXTEND THIS']
+
+  applyChanges "abstract void applyChanges(DocumentContext doc)" [note: 'Your field changes here']
+  migrate "final void migrate(doc) → applyChanges + set version" [note: 'Auto-bumps $.version']
+}
+
+Table JsonSchemaDefinition {
+  description "Interface: field rules for a (type, version)" [note: 'YOU IMPLEMENT']
+
+  jsonType "String — e.g. CREDENTIAL" [note: 'Must match migration type']
+  version "int — e.g. 3" [note: 'Which version this describes']
+  rules "List<JsonFieldRule> — the validation rules" [note: 'required / optional / forbidden']
+}
+
+// ──────────────────────────────────────────
+// VALIDATION BUILDING BLOCKS
+// ──────────────────────────────────────────
+
+Table JsonFieldRule {
+  description "Defines one field validation rule" [note: 'BUILDING BLOCK']
+
+  jsonPath "String — e.g. $.fields.key_id" [note: 'JsonPath to the field']
+  presence "REQUIRED | OPTIONAL | FORBIDDEN" [note: 'Must exist / may exist / must not exist']
+  expectedType "FieldType — STRING, NUMBER, etc." [note: 'Type check (skipped for ANY)']
+  defaultValue "Object — hint for error messages" [note: 'Optional default']
+}
+
+Table FieldType {
+  description "Enum: expected JSON value types" [note: 'ENUM']
+
+  STRING "Java String" [note: '"hello"']
+  NUMBER "Java Number" [note: '42, 3.14']
+  BOOLEAN "Java Boolean" [note: 'true, false']
+  OBJECT "Java Map" [note: '{"key": "val"}']
+  ARRAY "Java Collection" [note: '[1, 2, 3]']
+  ANY "any type" [note: 'Skip type check']
+}
+
+// ──────────────────────────────────────────
+// RESULT OBJECTS
+// ──────────────────────────────────────────
+
+Table MigrationResult {
+  description "Migration + validation result (untyped)" [note: 'RESULT']
+
+  json "String — migrated JSON" [note: 'Always available']
+  validation "JsonValidationResult" [note: 'Check isValid()']
+  isValid "boolean" [note: 'Shorthand for validation.isValid()']
+}
+
+Table TypedMigrationResult {
+  description "Migration + validation + POJO (typed)" [note: 'RESULT<T>']
+
+  json "String — migrated JSON" [note: 'Inherited from MigrationResult']
+  validation "JsonValidationResult" [note: 'Inherited']
+  value "T — deserialized POJO" [note: 'The typed object']
+  getValueOrDefault "T — POJO or fallback" [note: 'Safe accessor']
+}
+
+Table JsonValidationResult {
+  description "Validation outcome with error details" [note: 'RESULT']
+
+  isValid "boolean — true if no errors" [note: 'Main check']
+  errors "List<JsonValidationError>" [note: 'Individual errors']
+  errorCount "int" [note: 'Number of errors']
+  errorSummary "String — human readable" [note: 'Multi-line summary']
+  throwIfInvalid "void — throws if errors" [note: 'Throws JsonValidationException']
+}
+
+Table JsonValidationError {
+  description "Single validation error" [note: 'ERROR']
+
+  code "ErrorCode enum" [note: 'MISSING_REQUIRED_FIELD, TYPE_MISMATCH, etc.']
+  jsonPath "String — e.g. $.fields.key_id" [note: 'Where the error is']
+  message "String — human readable" [note: 'Description of what went wrong']
+}
+
+Table ErrorCode {
+  description "All possible validation error codes" [note: 'ENUM']
+
+  MISSING_REQUIRED_FIELD "Required field absent or null"
+  TYPE_MISMATCH "Field exists but wrong type"
+  FORBIDDEN_FIELD_PRESENT "Deprecated field still exists"
+  NO_SCHEMA_FOUND "No schema for this version"
+  VERSION_MISSING "$.version field not in JSON"
+  VERSION_UNPARSEABLE "$.version is not a number"
+  VERSION_UNKNOWN "Version higher than latest"
+  VERSION_NOT_LATEST "Version is old (not latest)"
+}
+
+// ──────────────────────────────────────────
+// DESERIALIZATION
+// ──────────────────────────────────────────
+
+Table JsonDeserializer {
+  description "Functional interface: JSON → POJO" [note: 'YOU PROVIDE']
+
+  deserialize "T deserialize(String json)" [note: 'e.g. objectMapper.readValue(json, Dto.class)']
+}
+
+Table JacksonDeserializer {
+  description "Helper: creates deserializer from ObjectMapper" [note: 'CONVENIENCE']
+
+  create "static JsonDeserializer<T> create(objectMapper, type)" [note: 'Reflection-based, no compile dep']
+}
+
+// ──────────────────────────────────────────
+// SPRING BOOT
+// ──────────────────────────────────────────
+
+Table JsonMigratorAutoConfiguration {
+  description "Spring Boot starter — auto-creates all beans" [note: 'AUTO-CONFIG']
+
+  jsonMigrationRegistry "Bean — collects @Component migrations"
+  jsonSchemaRegistry "Bean — collects @Component schemas"
+  jsonValidationService "Bean — wired with both registries"
+  jsonMigrationService "Bean — wired with registry + validation"
+}
+
+// ──────────────────────────────────────────
+// YOUR CODE (consumer side)
+// ──────────────────────────────────────────
+
+Table YourMigrations {
+  description "Example: what you write per JSON type" [note: 'YOUR CODE']
+
+  CredentialV1ToV2 "@Component extends AbstractJsonVersionMigration"
+  CredentialV2ToV3 "@Component extends AbstractJsonVersionMigration"
+  CredentialV3ToV4 "@Component extends AbstractJsonVersionMigration"
+  BrandingV1ToV2 "@Component extends AbstractJsonVersionMigration"
+}
+
+Table YourSchemas {
+  description "Example: per-version schema definitions" [note: 'YOUR CODE']
+
+  CredentialV1Schema "@Component implements JsonSchemaDefinition"
+  CredentialV2Schema "@Component implements JsonSchemaDefinition"
+  CredentialV3Schema "@Component implements JsonSchemaDefinition"
+  BrandingV1Schema "@Component implements JsonSchemaDefinition"
+}
+
+Table YourService {
+  description "Example: how you use it in your service" [note: 'YOUR CODE']
+
+  read_json "migrationService.migrateToLatest(type, json)" [note: 'Returns String']
+  read_pojo "migrationService.migrateToLatest(type, json, deserializer)" [note: 'Returns POJO']
+  read_validated "migrationService.migrateValidateOrThrow(type, json, deser)" [note: 'Returns POJO, throws if bad']
+  write_latest "validationService.validateInputOrThrow(type, json)" [note: 'Reject non-latest']
+  write_any "validationService.validateInputAnyVersionOrThrow(type, json)" [note: 'Accept any version with schema']
+}
+
+// ══════════════════════════════════════════
+// RELATIONSHIPS
+// ══════════════════════════════════════════
+
+// Service → Registry (uses)
+Ref: JsonMigrationService.migrateToLatest > JsonMigrationRegistry.getMigrationChain
+Ref: JsonMigrationService.migrateAndValidate > JsonValidationService.validate
+Ref: JsonMigrationService.migrateToLatest_typed > JsonDeserializer.deserialize
+
+// Validation → Schema Registry
+Ref: JsonValidationService.validate > JsonSchemaRegistry.getLatestSchema
+Ref: JsonValidationService.validateInput > JsonSchemaRegistry.getSchema
+Ref: JsonValidationService.validateInputAnyVersion > JsonSchemaRegistry.getSchema
+
+// Validation → Migration Registry (for version knowledge)
+Ref: JsonValidationService.validateInput > JsonMigrationRegistry.getLatestVersion
+
+// Registry → Interfaces (collects)
+Ref: JsonMigrationRegistry.getMigrationChain > JsonVersionMigration.migrate
+Ref: JsonSchemaRegistry.getSchema > JsonSchemaDefinition.rules
+
+// Inheritance
+Ref: AbstractJsonVersionMigration.applyChanges > JsonVersionMigration.migrate
+Ref: TypedMigrationResult.json > MigrationResult.json
+
+// Schema → Rules
+Ref: JsonSchemaDefinition.rules > JsonFieldRule.jsonPath
+Ref: JsonFieldRule.expectedType > FieldType.STRING
+
+// Results
+Ref: MigrationResult.validation > JsonValidationResult.isValid
+Ref: JsonValidationResult.errors > JsonValidationError.code
+Ref: JsonValidationError.code > ErrorCode.MISSING_REQUIRED_FIELD
+
+// Auto-config → Beans
+Ref: JsonMigratorAutoConfiguration.jsonMigrationRegistry > JsonMigrationRegistry.init
+Ref: JsonMigratorAutoConfiguration.jsonSchemaRegistry > JsonSchemaRegistry.init
+Ref: JsonMigratorAutoConfiguration.jsonValidationService > JsonValidationService.validate
+Ref: JsonMigratorAutoConfiguration.jsonMigrationService > JsonMigrationService.migrateToLatest
+
+// Your code → Library
+Ref: YourMigrations.CredentialV1ToV2 > AbstractJsonVersionMigration.applyChanges
+Ref: YourSchemas.CredentialV1Schema > JsonSchemaDefinition.rules
+Ref: YourService.read_pojo > JsonMigrationService.migrateToLatest_typed
+Ref: YourService.write_any > JsonValidationService.validateInputAnyVersion
