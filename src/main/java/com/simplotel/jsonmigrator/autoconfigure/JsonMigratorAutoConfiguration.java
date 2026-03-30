@@ -43,8 +43,12 @@ public class JsonMigratorAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public JsonValidationService jsonValidationService(JsonSchemaRegistry schemaRegistry) {
-        return new JsonValidationService(schemaRegistry);
+    public JsonValidationService jsonValidationService(
+            JsonSchemaRegistry schemaRegistry,
+            JsonMigrationRegistry migrationRegistry) {
+        JsonValidationService service = new JsonValidationService(schemaRegistry);
+        service.setMigrationRegistry(migrationRegistry);
+        return service;
     }
 
     @Bean

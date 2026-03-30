@@ -9,7 +9,11 @@ public class JsonValidationError {
         MISSING_REQUIRED_FIELD,
         TYPE_MISMATCH,
         FORBIDDEN_FIELD_PRESENT,
-        NO_SCHEMA_FOUND
+        NO_SCHEMA_FOUND,
+        VERSION_MISSING,
+        VERSION_UNPARSEABLE,
+        VERSION_UNKNOWN,
+        VERSION_NOT_LATEST
     }
 
     private final ErrorCode code;

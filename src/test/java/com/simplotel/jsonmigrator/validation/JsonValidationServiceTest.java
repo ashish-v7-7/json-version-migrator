@@ -68,15 +68,20 @@ class JsonValidationServiceTest {
 
     @BeforeEach
     void setUp() {
-        // Schema registry
-        JsonSchemaRegistry schemaRegistry = new JsonSchemaRegistry(List.of(new CredentialV3Schema()));
-        schemaRegistry.init();
-        validationService = new JsonValidationService(schemaRegistry);
-
         // Migration registry
         JsonMigrationRegistry migrationRegistry = new JsonMigrationRegistry(List.of(
                 new CredV1ToV2(), new CredV2ToV3()));
         migrationRegistry.init();
+
+        // Schema registry
+        JsonSchemaRegistry schemaRegistry = new JsonSchemaRegistry(List.of(new CredentialV3Schema()));
+        schemaRegistry.init();
+
+        // Validation service — wired with both registries
+        validationService = new JsonValidationService(schemaRegistry);
+        validationService.setMigrationRegistry(migrationRegistry);
+
+        // Migration service
         migrationService = new JsonMigrationService(migrationRegistry);
         migrationService.setValidationService(validationService);
     }
@@ -350,6 +355,218 @@ class JsonValidationServiceTest {
         @DisplayName("valid result summary says no errors")
         void validSummary() {
             assertThat(JsonValidationResult.valid().getErrorSummary()).isEqualTo("No errors");
+        }
+    }
+
+    // ── Tests: strict input validation ──
+
+    @Nested
+    @DisplayName("validateInput()")
+    class ValidateInput {
+
+        @Test
+        @DisplayName("valid latest-version JSON passes")
+        void validLatest() {
+            String json = """
+                {"version":"3","fields":{"api_key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("rejects JSON with no version field")
+        void missingVersion() {
+            String json = """
+                {"fields":{"api_key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_MISSING);
+            assertThat(result.getErrors().get(0).getMessage()).contains("missing");
+        }
+
+        @Test
+        @DisplayName("rejects JSON with unparseable version")
+        void unparseableVersion() {
+            String json = """
+                {"version":"abc","fields":{"api_key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_UNPARSEABLE);
+        }
+
+        @Test
+        @DisplayName("rejects JSON with old version (not latest)")
+        void oldVersion() {
+            String json = """
+                {"version":"1","fields":{"key_id":"rzp","key_secret":"sk"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_NOT_LATEST);
+            assertThat(result.getErrors().get(0).getMessage()).contains("outdated");
+            assertThat(result.getErrors().get(0).getMessage()).contains("3"); // latest
+        }
+
+        @Test
+        @DisplayName("rejects JSON with version higher than latest")
+        void futureVersion() {
+            String json = """
+                {"version":"99","fields":{"api_key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("rejects null JSON")
+        void nullJson() {
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", null);
+            assertThat(result.isValid()).isFalse();
+        }
+
+        @Test
+        @DisplayName("latest version but invalid structure reports field errors")
+        void latestVersionBadStructure() {
+            // Version 3 but missing required fields
+            String json = """
+                {"version":"3","fields":{"gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors()).anyMatch(e ->
+                    e.getCode() == JsonValidationError.ErrorCode.MISSING_REQUIRED_FIELD);
+        }
+
+        @Test
+        @DisplayName("unknown type with no registrations passes (no-op)")
+        void unknownType() {
+            String json = """
+                {"version":"1","data":"test"}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("UNKNOWN", json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("dot format version '1.0' is parsed correctly and rejected as old")
+        void dotFormatVersion() {
+            String json = """
+                {"version":"1.0","fields":{"key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_NOT_LATEST);
+        }
+    }
+
+    // ── Tests: validateInputOrThrow ──
+
+    @Nested
+    @DisplayName("validateInputOrThrow()")
+    class ValidateInputOrThrow {
+
+        @Test
+        @DisplayName("passes for valid latest-version JSON")
+        void passesForValid() {
+            String json = """
+                {"version":"3","fields":{"api_key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            assertThatCode(() -> validationService.validateInputOrThrow("CREDENTIAL", json))
+                    .doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("throws for old version")
+        void throwsForOldVersion() {
+            String json = """
+                {"version":"2","fields":{"key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            assertThatThrownBy(() -> validationService.validateInputOrThrow("CREDENTIAL", json))
+                    .isInstanceOf(JsonValidationException.class)
+                    .hasMessageContaining("CREDENTIAL");
+        }
+
+        @Test
+        @DisplayName("throws for missing version")
+        void throwsForMissingVersion() {
+            String json = """
+                {"fields":{"api_key_id":"rzp"}}
+                """;
+
+            assertThatThrownBy(() -> validationService.validateInputOrThrow("CREDENTIAL", json))
+                    .isInstanceOf(JsonValidationException.class)
+                    .hasMessageContaining("CREDENTIAL");
+        }
+    }
+
+    // ── Tests: validateInputForVersion ──
+
+    @Nested
+    @DisplayName("validateInputForVersion()")
+    class ValidateInputForVersion {
+
+        @Test
+        @DisplayName("passes when version matches expected")
+        void matchingVersion() {
+            String json = """
+                {"version":"3","fields":{"api_key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputForVersion("CREDENTIAL", 3, json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("rejects when version does not match expected")
+        void mismatchedVersion() {
+            String json = """
+                {"version":"2","fields":{"key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputForVersion("CREDENTIAL", 3, json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_NOT_LATEST);
+            assertThat(result.getErrors().get(0).getMessage()).contains("Expected version 3 but got 2");
+        }
+
+        @Test
+        @DisplayName("rejects when version field is missing")
+        void missingVersion() {
+            String json = """
+                {"fields":{"api_key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputForVersion("CREDENTIAL", 3, json);
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_MISSING);
         }
     }
 }
