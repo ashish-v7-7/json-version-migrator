@@ -13,6 +13,18 @@ A chain-based migration and validation framework for evolving versioned JSON str
 - [Installation](#installation)
 - [Quick Start (3 Steps)](#quick-start)
 - [Real-World Example: Hotel Payment Gateway Credentials](#real-world-example-hotel-payment-gateway-credentials)
+- [Deep Dive: Step-by-Step Explanation with Full Code](#deep-dive-step-by-step-explanation-with-full-code)
+  - [Scenario: Restaurant Branding Config](#scenario-restaurant-branding-config)
+  - [Phase 1 — The database table](#phase-1--the-database-table)
+  - [Phase 2 — The DTO that reads this JSON](#phase-2--the-dto-that-reads-this-json)
+  - [Phase 3 — Schema changes over 6 months](#phase-3--schema-changes-over-6-months)
+  - [Phase 4 — Writing the migration classes](#phase-4--writing-the-migration-classes)
+  - [Phase 5 — Defining the validation schema](#phase-5--defining-the-validation-schema)
+  - [Phase 6 — Wiring into your service layer](#phase-6--wiring-into-your-service-layer)
+  - [Phase 7 — What happens at runtime (line by line)](#phase-7--what-happens-at-runtime-line-by-line)
+  - [Phase 8 — What the logs show](#phase-8--what-the-logs-show)
+  - [Phase 9 — When validation catches a problem](#phase-9--when-validation-catches-a-problem)
+  - [Phase 10 — Adding a new version in the future](#phase-10--adding-a-new-version-in-the-future)
 - [How It Works](#how-it-works)
 - [Core Components — Migration](#core-components--migration)
   - [JsonVersionMigration (interface)](#jsonversionmigration-interface)
@@ -393,6 +405,666 @@ DB Row (v1, stored 6 months ago)          In Memory
 - **No DB writes** — the original row is untouched (write back explicitly if you want)
 - **Structural guarantee** — validation catches bad data before it hits your DTO
 - **New hotels** get v4 format from day one — the migration chain is only for old data
+
+---
+
+## Deep Dive: Step-by-Step Explanation with Full Code
+
+This section walks through a **complete, realistic example** from scratch — every file, every line explained, every JSON transformation shown. By the end, you'll understand exactly how the framework works internally.
+
+### Scenario: Restaurant Branding Config
+
+You're building a hospitality platform. Each restaurant has a **branding configuration** stored as JSON in the database — logo, colors, display name, etc. This config powers the customer-facing payment page.
+
+### Phase 1 — The database table
+
+Your `restaurant_config` table has a `branding_config` column (MySQL JSON type):
+
+```sql
+CREATE TABLE restaurant_config (
+    id          VARCHAR(36) PRIMARY KEY,
+    name        VARCHAR(255) NOT NULL,
+    branding_config JSON,   -- ← this is the versioned JSON we're migrating
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+When the platform launched, restaurants were onboarded with this JSON (version 1):
+
+```json
+{
+  "version": "1.0",
+  "logo_url": "https://cdn.example.com/logos/taj-hotel.png",
+  "theme_color": "#1a73e8"
+}
+```
+
+### Phase 2 — The DTO that reads this JSON
+
+Your Java DTO for the **latest** version will look like this (we'll build up to it):
+
+```java
+// This is what we WANT the branding config to look like at v4 (latest)
+public class BrandingConfig {
+    private String version;
+    private String logoUrl;
+    private String faviconUrl;       // added in v2
+    private String displayName;      // added in v2
+    private String themeColor;
+    private String primaryFont;      // added in v3
+    private Map<String, String> socialLinks;  // added in v4
+    // (poweredByText was removed in v4)
+}
+```
+
+### Phase 3 — Schema changes over 6 months
+
+Here's how the branding config evolved:
+
+| Version | What changed | Why |
+|---------|-------------|-----|
+| **v1** | Initial: `logo_url`, `theme_color` | MVP launch |
+| **v2** | Added `favicon_url`, `display_name` | Customers wanted branded tab icons and restaurant name on payment page |
+| **v3** | Added `primary_font`, `powered_by_text` | Design team wanted custom fonts. Marketing added "powered by" branding |
+| **v4** | Added `social_links` (object). Removed `powered_by_text` | Legal said "powered by" was misleading. Product wanted social media links |
+
+So the JSON evolved like this:
+
+**v1 (January — launch):**
+```json
+{
+  "version": "1.0",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "theme_color": "#1a73e8"
+}
+```
+
+**v2 (February — favicon + display name):**
+```json
+{
+  "version": "2",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "favicon_url": "https://cdn.example.com/favicons/taj.ico",
+  "display_name": "",
+  "theme_color": "#1a73e8"
+}
+```
+
+**v3 (April — fonts + powered-by):**
+```json
+{
+  "version": "3",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "favicon_url": "https://cdn.example.com/favicons/taj.ico",
+  "display_name": "",
+  "theme_color": "#1a73e8",
+  "primary_font": "Inter",
+  "powered_by_text": "Powered by Simplotel"
+}
+```
+
+**v4 (June — social links, remove powered-by):**
+```json
+{
+  "version": "4",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "favicon_url": "https://cdn.example.com/favicons/taj.ico",
+  "display_name": "",
+  "theme_color": "#1a73e8",
+  "primary_font": "Inter",
+  "social_links": {}
+}
+```
+
+The problem: **your database has 500 restaurants**, each stuck at whatever version they were created with. 200 are at v1, 150 at v2, 100 at v3, and 50 at v4. You can't make them all change at once.
+
+### Phase 4 — Writing the migration classes
+
+First, define your type constant:
+
+```java
+package com.example.migration;
+
+public final class JsonTypes {
+    private JsonTypes() {}
+    public static final String BRANDING = "BRANDING";
+}
+```
+
+Now, one class per version step. Each class is a Spring `@Component` — the framework auto-discovers it.
+
+**V1 → V2: Add `favicon_url` and `display_name`**
+
+```java
+package com.example.migration.branding;
+
+import com.jayway.jsonpath.DocumentContext;
+import com.simplotel.jsonmigrator.AbstractJsonVersionMigration;
+import com.example.migration.JsonTypes;
+import org.springframework.stereotype.Component;
+
+@Component
+public class BrandingV1ToV2 extends AbstractJsonVersionMigration {
+
+    // Which JSON family does this migration belong to?
+    @Override
+    public String jsonType() {
+        return JsonTypes.BRANDING;  // "BRANDING"
+    }
+
+    // What version does this migration READ?
+    @Override
+    public int fromVersion() {
+        return 1;  // reads v1
+    }
+
+    // What version does this migration PRODUCE?
+    // MUST be fromVersion() + 1. The framework enforces this at startup.
+    @Override
+    public int toVersion() {
+        return 2;  // produces v2
+    }
+
+    // The actual changes. The "version" field is updated automatically
+    // by AbstractJsonVersionMigration — you don't need to set it.
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        // doc.put(parentPath, newKey, value)
+        // — adds "favicon_url" inside the root object ($) with an empty default
+        doc.put("$", "favicon_url", "");
+
+        // — adds "display_name" with empty string
+        //   (the restaurant can fill this in later via the admin panel)
+        doc.put("$", "display_name", "");
+    }
+}
+```
+
+> **Key concept:** `doc.put("$", "favicon_url", "")` means: "in the root object (`$`), add a key called `favicon_url` with value `""`. If the key already exists, it gets overwritten."
+
+**V2 → V3: Add `primary_font` and `powered_by_text`**
+
+```java
+package com.example.migration.branding;
+
+import com.jayway.jsonpath.DocumentContext;
+import com.simplotel.jsonmigrator.AbstractJsonVersionMigration;
+import com.example.migration.JsonTypes;
+import org.springframework.stereotype.Component;
+
+@Component
+public class BrandingV2ToV3 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.BRANDING; }
+    @Override public int fromVersion()  { return 2; }
+    @Override public int toVersion()    { return 3; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        // Add font with a sensible default
+        doc.put("$", "primary_font", "Inter");
+
+        // Add powered-by text (will be removed later in v4 — that's okay,
+        // each migration only knows about its own step)
+        doc.put("$", "powered_by_text", "Powered by Simplotel");
+    }
+}
+```
+
+**V3 → V4: Add `social_links` object, remove `powered_by_text`**
+
+```java
+package com.example.migration.branding;
+
+import com.jayway.jsonpath.DocumentContext;
+import com.simplotel.jsonmigrator.AbstractJsonVersionMigration;
+import com.example.migration.JsonTypes;
+import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashMap;
+
+@Component
+public class BrandingV3ToV4 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.BRANDING; }
+    @Override public int fromVersion()  { return 3; }
+    @Override public int toVersion()    { return 4; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        // Add an empty social_links object — restaurants fill it via admin panel
+        doc.put("$", "social_links", new LinkedHashMap<>());
+
+        // Remove the deprecated powered_by_text field.
+        // Wrapped in try-catch because some v3 docs might not have this field
+        // (e.g., if they were manually edited). Deletion of a non-existent path
+        // throws PathNotFoundException in JsonPath.
+        try {
+            doc.delete("$.powered_by_text");
+        } catch (Exception ignored) {
+            // Field doesn't exist — that's fine, nothing to remove
+        }
+    }
+}
+```
+
+### Phase 5 — Defining the validation schema
+
+Now define what v4 (the latest) MUST look like. This catches:
+- Missing fields (migration bug or corrupt data)
+- Wrong types (e.g., `theme_color` is a number instead of string)
+- Deprecated fields that should have been removed
+
+```java
+package com.example.migration.branding;
+
+import com.simplotel.jsonmigrator.validation.FieldType;
+import com.simplotel.jsonmigrator.validation.JsonFieldRule;
+import com.simplotel.jsonmigrator.validation.JsonSchemaDefinition;
+import com.example.migration.JsonTypes;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class BrandingV4Schema implements JsonSchemaDefinition {
+
+    // Which JSON type does this schema validate?
+    @Override
+    public String jsonType() {
+        return JsonTypes.BRANDING;
+    }
+
+    // Which version does this schema describe?
+    @Override
+    public int version() {
+        return 4;
+    }
+
+    @Override
+    public List<JsonFieldRule> rules() {
+        return List.of(
+            // ── Required fields: MUST exist with the correct type ──
+
+            // "version" must be a string (e.g., "4")
+            JsonFieldRule.required("$.version", FieldType.STRING),
+
+            // Core branding fields
+            JsonFieldRule.required("$.logo_url", FieldType.STRING),
+            JsonFieldRule.required("$.theme_color", FieldType.STRING),
+            JsonFieldRule.required("$.primary_font", FieldType.STRING),
+
+            // social_links must be an object (Map), even if empty {}
+            JsonFieldRule.required("$.social_links", FieldType.OBJECT),
+
+            // ── Optional fields: can be absent, but if present must match type ──
+
+            // favicon_url was added in v2 but is not critical
+            JsonFieldRule.optional("$.favicon_url", FieldType.STRING),
+
+            // display_name may be empty string or absent
+            JsonFieldRule.optional("$.display_name", FieldType.STRING),
+
+            // ── Forbidden fields: must NOT exist (removed/deprecated) ──
+
+            // powered_by_text was removed in v4 — if it's still there,
+            // the migration didn't run correctly
+            JsonFieldRule.forbidden("$.powered_by_text")
+        );
+    }
+}
+```
+
+> **Why define forbidden rules?** If `powered_by_text` still exists after migration, it means either the migration had a bug, or someone manually inserted bad data. The schema catches this.
+
+### Phase 6 — Wiring into your service layer
+
+Here's a complete Spring service that reads branding config from the database:
+
+```java
+package com.example.service;
+
+import com.example.dto.BrandingConfig;
+import com.example.migration.JsonTypes;
+import com.example.repository.RestaurantConfigRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.simplotel.jsonmigrator.JsonMigrationService;
+import com.simplotel.jsonmigrator.JsonMigrationService.MigrationResult;
+import com.simplotel.jsonmigrator.validation.JsonValidationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+@Service
+public class BrandingService {
+
+    private static final Logger log = LoggerFactory.getLogger(BrandingService.class);
+
+    // JsonMigrationService is auto-configured by the library.
+    // It has both migration and validation wired in.
+    private final JsonMigrationService migrationService;
+    private final RestaurantConfigRepository repository;
+    private final ObjectMapper objectMapper;
+
+    // Spring injects all three via constructor injection
+    public BrandingService(
+            JsonMigrationService migrationService,
+            RestaurantConfigRepository repository,
+            ObjectMapper objectMapper) {
+        this.migrationService = migrationService;
+        this.repository = repository;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Reads a restaurant's branding config from DB, migrates to latest version,
+     * validates the structure, and returns a typed DTO.
+     */
+    public BrandingConfig getBrandingConfig(String restaurantId) {
+
+        // Step 1: Read raw JSON string from database
+        String rawJson = repository.findById(restaurantId).getBrandingConfig();
+        // rawJson could be v1, v2, v3, or v4 — we don't know and don't care
+
+        // Step 2: Migrate + validate in one call
+        MigrationResult result = migrationService.migrateAndValidate(
+                JsonTypes.BRANDING,  // which type — the registry knows the chain
+                rawJson              // the raw JSON from DB
+        );
+
+        // Step 3: Check if validation passed
+        if (!result.isValid()) {
+            // Log every error for debugging
+            log.error("Branding config validation failed for restaurant {}:\n{}",
+                    restaurantId,
+                    result.getValidation().getErrorSummary());
+
+            // You decide what to do: throw, return default, alert, etc.
+            throw new IllegalStateException(
+                    "Corrupt branding config for restaurant " + restaurantId);
+        }
+
+        // Step 4: Deserialize the migrated (and validated) JSON into your DTO
+        try {
+            return objectMapper.readValue(result.getJson(), BrandingConfig.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize branding config", e);
+        }
+    }
+
+    /**
+     * Alternative: use migrateValidateOrThrow() for a more concise approach.
+     * Throws JsonValidationException automatically if validation fails.
+     */
+    public BrandingConfig getBrandingConfigStrict(String restaurantId) {
+        String rawJson = repository.findById(restaurantId).getBrandingConfig();
+
+        // One line: migrate + validate + throw if invalid
+        String migrated = migrationService.migrateValidateOrThrow(
+                JsonTypes.BRANDING, rawJson);
+
+        try {
+            return objectMapper.readValue(migrated, BrandingConfig.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize branding config", e);
+        }
+    }
+
+    /**
+     * Validates branding config BEFORE saving to DB.
+     * Ensures we never write bad data.
+     */
+    public void saveBrandingConfig(String restaurantId, BrandingConfig config) {
+        try {
+            String json = objectMapper.writeValueAsString(config);
+
+            // Validate before writing — catch bad data at the source
+            migrationService.migrateValidateOrThrow(JsonTypes.BRANDING, json);
+
+            repository.updateBrandingConfig(restaurantId, json);
+        } catch (JsonValidationException e) {
+            throw new IllegalArgumentException(
+                    "Invalid branding config: " + e.getResult().getErrorSummary());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to save branding config", e);
+        }
+    }
+}
+```
+
+### Phase 7 — What happens at runtime (line by line)
+
+A restaurant was onboarded in January with v1 JSON. Today it's June, the code is at v4. Here's exactly what happens when `getBrandingConfig("restaurant-42")` is called:
+
+```
+Input (from database):
+{
+  "version": "1.0",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "theme_color": "#1a73e8"
+}
+```
+
+**Inside `migrationService.migrateAndValidate("BRANDING", rawJson)`:**
+
+```
+1. Parse JSON into DocumentContext
+
+2. Read $.version → "1.0"
+   → Parse: "1.0".split(".")[0] = "1" → integer 1
+
+3. Ask registry: what's the latest version for "BRANDING"?
+   → Registry has: V1→V2, V2→V3, V3→V4
+   → Latest = 4
+
+4. Current (1) < Latest (4) → migration needed!
+
+5. Get chain: registry.getMigrationChain("BRANDING", 1)
+   → Returns: [BrandingV1ToV2, BrandingV2ToV3, BrandingV3ToV4]
+
+6. Apply BrandingV1ToV2:
+   Before: {"version":"1.0","logo_url":"...","theme_color":"#1a73e8"}
+   → doc.put("$", "favicon_url", "")
+   → doc.put("$", "display_name", "")
+   → doc.put("$", "version", "2")     ← auto by AbstractJsonVersionMigration
+   After:  {"version":"2","logo_url":"...","theme_color":"#1a73e8",
+            "favicon_url":"","display_name":""}
+
+7. Apply BrandingV2ToV3:
+   → doc.put("$", "primary_font", "Inter")
+   → doc.put("$", "powered_by_text", "Powered by Simplotel")
+   → doc.put("$", "version", "3")
+   After:  {"version":"3","logo_url":"...","theme_color":"#1a73e8",
+            "favicon_url":"","display_name":"",
+            "primary_font":"Inter","powered_by_text":"Powered by Simplotel"}
+
+8. Apply BrandingV3ToV4:
+   → doc.put("$", "social_links", {})
+   → doc.delete("$.powered_by_text")
+   → doc.put("$", "version", "4")
+   After:  {"version":"4","logo_url":"...","theme_color":"#1a73e8",
+            "favicon_url":"","display_name":"",
+            "primary_font":"Inter","social_links":{}}
+
+9. Migration complete! Now validate against BrandingV4Schema:
+
+   Rule: required("$.version", STRING)       → "4" exists, is String    ✓
+   Rule: required("$.logo_url", STRING)      → "https://..." exists     ✓
+   Rule: required("$.theme_color", STRING)   → "#1a73e8" exists         ✓
+   Rule: required("$.primary_font", STRING)  → "Inter" exists           ✓
+   Rule: required("$.social_links", OBJECT)  → {} exists, is Map        ✓
+   Rule: optional("$.favicon_url", STRING)   → "" exists, is String     ✓
+   Rule: optional("$.display_name", STRING)  → "" exists, is String     ✓
+   Rule: forbidden("$.powered_by_text")      → not present              ✓
+
+   All 8 rules passed → JsonValidationResult.isValid() = true
+
+10. Return MigrationResult:
+    - json = the migrated JSON string (v4)
+    - validation = valid (no errors)
+```
+
+**Final output JSON:**
+```json
+{
+  "version": "4",
+  "logo_url": "https://cdn.example.com/logos/taj.png",
+  "theme_color": "#1a73e8",
+  "favicon_url": "",
+  "display_name": "",
+  "primary_font": "Inter",
+  "social_links": {}
+}
+```
+
+This gets deserialized into `BrandingConfig` DTO with all fields populated. The original v1 row in the database is **never modified**.
+
+### Phase 8 — What the logs show
+
+With default logging, you'll see:
+
+```
+# At application startup (once):
+INFO  json-migrator: registered 3 steps for 'BRANDING' (v1 → v4)
+INFO  json-migrator: registered schemas for 'BRANDING': v4
+
+# At runtime (each migration):
+INFO  json-migrator: migrating 'BRANDING' from v1 to v4
+DEBUG json-migrator: applying 'BRANDING' v1 → v2
+DEBUG json-migrator: applying 'BRANDING' v2 → v3
+DEBUG json-migrator: applying 'BRANDING' v3 → v4
+
+# If validation fails (only shown when there are errors):
+WARN  json-migrator: validation failed for 'BRANDING' v4 — 2 error(s)
+```
+
+### Phase 9 — When validation catches a problem
+
+Suppose someone manually inserted a row with broken data:
+
+```json
+{
+  "version": "4",
+  "logo_url": "https://cdn.example.com/logos/bad.png",
+  "theme_color": 12345,
+  "primary_font": "Inter",
+  "social_links": "not-an-object",
+  "powered_by_text": "should not be here"
+}
+```
+
+The validation catches **3 errors**:
+
+```
+[TYPE_MISMATCH] $.theme_color — Field '$.theme_color' expected STRING but got Integer (12345)
+[TYPE_MISMATCH] $.social_links — Field '$.social_links' expected OBJECT but got String (not-an-object)
+[FORBIDDEN_FIELD_PRESENT] $.powered_by_text — Forbidden field '$.powered_by_text' still exists (should have been removed)
+```
+
+Your service code handles this:
+
+```java
+MigrationResult result = migrationService.migrateAndValidate("BRANDING", rawJson);
+
+if (!result.isValid()) {
+    // result.getValidation().getErrorCount() → 3
+    // result.getValidation().getErrorSummary() → the 3 lines above
+    // result.getValidation().getErrors() → List of 3 JsonValidationError objects
+
+    for (JsonValidationError error : result.getValidation().getErrors()) {
+        // error.getCode()     → TYPE_MISMATCH, FORBIDDEN_FIELD_PRESENT
+        // error.getJsonPath() → "$.theme_color", "$.social_links", "$.powered_by_text"
+        // error.getMessage()  → human-readable description
+    }
+}
+```
+
+### Phase 10 — Adding a new version in the future
+
+It's September. Product wants to add a `dark_mode` boolean to branding. Here's everything you need to do:
+
+**1. Write the migration (1 file):**
+
+```java
+@Component
+public class BrandingV4ToV5 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.BRANDING; }
+    @Override public int fromVersion()  { return 4; }
+    @Override public int toVersion()    { return 5; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        doc.put("$", "dark_mode", false);
+    }
+}
+```
+
+**2. Update the schema (edit existing file or create new one):**
+
+```java
+@Component
+public class BrandingV5Schema implements JsonSchemaDefinition {
+
+    @Override public String jsonType() { return JsonTypes.BRANDING; }
+    @Override public int version()     { return 5; }
+
+    @Override
+    public List<JsonFieldRule> rules() {
+        return List.of(
+            // All v4 rules carry forward...
+            JsonFieldRule.required("$.version", FieldType.STRING),
+            JsonFieldRule.required("$.logo_url", FieldType.STRING),
+            JsonFieldRule.required("$.theme_color", FieldType.STRING),
+            JsonFieldRule.required("$.primary_font", FieldType.STRING),
+            JsonFieldRule.required("$.social_links", FieldType.OBJECT),
+            JsonFieldRule.optional("$.favicon_url", FieldType.STRING),
+            JsonFieldRule.optional("$.display_name", FieldType.STRING),
+            JsonFieldRule.forbidden("$.powered_by_text"),
+
+            // New in v5:
+            JsonFieldRule.required("$.dark_mode", FieldType.BOOLEAN)
+        );
+    }
+}
+```
+
+**3. Update your DTO:**
+
+```java
+public class BrandingConfig {
+    // ...existing fields...
+    private Boolean darkMode;  // new
+}
+```
+
+**That's it.** Deploy the code. All 500 restaurants — whether at v1, v2, v3, or v4 — will automatically migrate to v5 on the next read. The chain resolves the shortest path:
+
+- v1 restaurants: V1→V2→V3→V4→V5 (4 steps)
+- v2 restaurants: V2→V3→V4→V5 (3 steps)
+- v3 restaurants: V3→V4→V5 (2 steps)
+- v4 restaurants: V4→V5 (1 step)
+- v5 restaurants: no migration needed (0 steps)
+
+### Complete file listing for this example
+
+```
+src/main/java/com/example/
+├── dto/
+│   └── BrandingConfig.java              # DTO with all v5 fields
+├── migration/
+│   ├── JsonTypes.java                   # public static final String BRANDING = "BRANDING"
+│   └── branding/
+│       ├── BrandingV1ToV2.java          # add favicon_url, display_name
+│       ├── BrandingV2ToV3.java          # add primary_font, powered_by_text
+│       ├── BrandingV3ToV4.java          # add social_links, remove powered_by_text
+│       ├── BrandingV4ToV5.java          # add dark_mode
+│       └── BrandingV5Schema.java        # validation schema for v5
+├── repository/
+│   └── RestaurantConfigRepository.java  # jOOQ/JDBC reads from DB
+└── service/
+    └── BrandingService.java             # injects JsonMigrationService, uses migrateAndValidate()
+```
 
 ---
 
