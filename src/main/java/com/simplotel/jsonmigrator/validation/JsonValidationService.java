@@ -237,6 +237,100 @@ public class JsonValidationService {
     }
 
     /**
+     * Validates input JSON against the schema matching its declared version.
+     * Accepts <b>any</b> version that has a registered schema — not just the latest.
+     *
+     * <p>Use this when you store schemas for every version and want to validate
+     * input at whatever version it declares:</p>
+     *
+     * <pre>{@code
+     * // Accepts v1, v2, v3, v4, v5 — as long as a schema exists for that version
+     * validationService.validateInputAnyVersion("BRANDING", json);
+     * }</pre>
+     *
+     * <p>Checks:</p>
+     * <ol>
+     *   <li>{@code $.version} field exists and is parseable</li>
+     *   <li>Version is not higher than the latest known version</li>
+     *   <li>A schema is registered for that exact version</li>
+     *   <li>JSON structure matches the schema for that version</li>
+     * </ol>
+     *
+     * @param type the JSON document type
+     * @param json the JSON string to validate
+     * @return the validation result
+     */
+    public JsonValidationResult validateInputAnyVersion(String type, String json) {
+        if (json == null || json.isBlank()) {
+            return new JsonValidationResult(List.of(
+                    new JsonValidationError(ErrorCode.MISSING_REQUIRED_FIELD, "$",
+                            "JSON is null or blank")));
+        }
+
+        DocumentContext doc = JsonPath.using(JSON_PATH_CONFIG).parse(json);
+        JsonValidationResult.Builder builder = new JsonValidationResult.Builder();
+
+        // 1. Check version field exists
+        Object versionObj = doc.read(versionJsonPath);
+        if (versionObj == null) {
+            builder.addError(ErrorCode.VERSION_MISSING, versionJsonPath,
+                    String.format("Version field '%s' is missing. Every JSON document must have a version.",
+                            versionJsonPath));
+            return builder.build();
+        }
+
+        // 2. Check version is parseable
+        int version = parseVersion(versionObj);
+        if (version < 1) {
+            builder.addError(ErrorCode.VERSION_UNPARSEABLE, versionJsonPath,
+                    String.format("Version '%s' is not a valid version number.", versionObj));
+            return builder.build();
+        }
+
+        // 3. Check version is not future
+        int latestVersion = getKnownLatestVersion(type);
+        if (latestVersion >= 1 && version > latestVersion) {
+            builder.addError(ErrorCode.VERSION_UNKNOWN, versionJsonPath,
+                    String.format("Version %d is unknown for type '%s'. Latest known version is %d.",
+                            version, type, latestVersion));
+            return builder.build();
+        }
+
+        // 4. Check a schema exists for this exact version
+        JsonSchemaDefinition schema = schemaRegistry.getSchema(type, version);
+        if (schema == null) {
+            builder.addError(ErrorCode.NO_SCHEMA_FOUND, versionJsonPath,
+                    String.format("No schema registered for type '%s' at version %d. "
+                                    + "Register a JsonSchemaDefinition for this version to enable validation.",
+                            type, version));
+            return builder.build();
+        }
+
+        // 5. Validate structure against that version's schema
+        for (JsonFieldRule rule : schema.rules()) {
+            validateField(doc, rule, builder);
+        }
+
+        JsonValidationResult result = builder.build();
+        if (!result.isValid()) {
+            log.warn("json-migrator: input validation failed for '{}' v{} — {} error(s)",
+                    type, version, result.getErrorCount());
+        }
+        return result;
+    }
+
+    /**
+     * Same as {@link #validateInputAnyVersion(String, String)} but throws on failure.
+     *
+     * @param type the JSON document type
+     * @param json the JSON string to validate
+     * @throws JsonValidationException if validation fails
+     */
+    public void validateInputAnyVersionOrThrow(String type, String json) {
+        validateInputAnyVersion(type, json).throwIfInvalid(type);
+    }
+
+    /**
      * Validates input allowing a specific version (not just latest).
      * Useful when you accept writes at a known older version.
      *

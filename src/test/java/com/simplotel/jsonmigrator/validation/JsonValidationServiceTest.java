@@ -36,6 +36,36 @@ class JsonValidationServiceTest {
         }
     }
 
+    static class CredentialV1Schema implements JsonSchemaDefinition {
+        public String jsonType()  { return "CREDENTIAL"; }
+        public int version()      { return 1; }
+
+        public List<JsonFieldRule> rules() {
+            return List.of(
+                    JsonFieldRule.required("$.version", FieldType.STRING),
+                    JsonFieldRule.required("$.fields", FieldType.OBJECT),
+                    JsonFieldRule.required("$.fields.key_id", FieldType.STRING),
+                    JsonFieldRule.required("$.fields.key_secret", FieldType.STRING)
+            );
+        }
+    }
+
+    static class CredentialV2Schema implements JsonSchemaDefinition {
+        public String jsonType()  { return "CREDENTIAL"; }
+        public int version()      { return 2; }
+
+        public List<JsonFieldRule> rules() {
+            return List.of(
+                    JsonFieldRule.required("$.version", FieldType.STRING),
+                    JsonFieldRule.required("$.fields", FieldType.OBJECT),
+                    JsonFieldRule.required("$.fields.key_id", FieldType.STRING),
+                    JsonFieldRule.required("$.fields.key_secret", FieldType.STRING),
+                    JsonFieldRule.required("$.fields.gateway_mode", FieldType.STRING),
+                    JsonFieldRule.forbidden("$.fields.api_key_id")  // not renamed yet in v2
+            );
+        }
+    }
+
     // ── Test migrations ──
 
     static class CredV1ToV2 extends AbstractJsonVersionMigration {
@@ -73,8 +103,9 @@ class JsonValidationServiceTest {
                 new CredV1ToV2(), new CredV2ToV3()));
         migrationRegistry.init();
 
-        // Schema registry
-        JsonSchemaRegistry schemaRegistry = new JsonSchemaRegistry(List.of(new CredentialV3Schema()));
+        // Schema registry (schemas for all versions)
+        JsonSchemaRegistry schemaRegistry = new JsonSchemaRegistry(List.of(
+                new CredentialV1Schema(), new CredentialV2Schema(), new CredentialV3Schema()));
         schemaRegistry.init();
 
         // Validation service — wired with both registries
@@ -567,6 +598,178 @@ class JsonValidationServiceTest {
             assertThat(result.isValid()).isFalse();
             assertThat(result.getErrors().get(0).getCode())
                     .isEqualTo(JsonValidationError.ErrorCode.VERSION_MISSING);
+        }
+    }
+
+    // ── Tests: validateInputAnyVersion ──
+
+    @Nested
+    @DisplayName("validateInputAnyVersion()")
+    class ValidateInputAnyVersion {
+
+        @Test
+        @DisplayName("v1 JSON validated against V1Schema — passes")
+        void v1PassesAgainstV1Schema() {
+            String json = """
+                {"version":"1","fields":{"key_id":"rzp_123","key_secret":"sk_456"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("v2 JSON validated against V2Schema — passes")
+        void v2PassesAgainstV2Schema() {
+            String json = """
+                {"version":"2","fields":{"key_id":"rzp_123","key_secret":"sk_456","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("v3 JSON validated against V3Schema — passes")
+        void v3PassesAgainstV3Schema() {
+            String json = """
+                {"version":"3","fields":{"api_key_id":"rzp_123","key_secret":"sk_456","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("v1 JSON with wrong structure — fails against V1Schema")
+        void v1FailsWithBadStructure() {
+            // v1 schema requires key_id, but this has api_key_id
+            String json = """
+                {"version":"1","fields":{"api_key_id":"rzp_123","key_secret":"sk_456"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors()).anyMatch(e ->
+                    e.getCode() == JsonValidationError.ErrorCode.MISSING_REQUIRED_FIELD
+                    && e.getJsonPath().equals("$.fields.key_id"));
+        }
+
+        @Test
+        @DisplayName("v2 JSON with v3 structure — fails (api_key_id forbidden in v2)")
+        void v2FailsWithV3Structure() {
+            // v2 schema has forbidden("$.fields.api_key_id") — renamed only in v3
+            String json = """
+                {"version":"2","fields":{"api_key_id":"rzp","key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors()).anyMatch(e ->
+                    e.getCode() == JsonValidationError.ErrorCode.FORBIDDEN_FIELD_PRESENT
+                    && e.getJsonPath().equals("$.fields.api_key_id"));
+        }
+
+        @Test
+        @DisplayName("rejects future version (no schema)")
+        void rejectsFutureVersion() {
+            String json = """
+                {"version":"99","fields":{"key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("rejects missing version")
+        void rejectsMissingVersion() {
+            String json = """
+                {"fields":{"key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_MISSING);
+        }
+
+        @Test
+        @DisplayName("rejects unparseable version")
+        void rejectsUnparseableVersion() {
+            String json = """
+                {"version":"abc","fields":{"key_id":"rzp"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.getErrors().get(0).getCode())
+                    .isEqualTo(JsonValidationError.ErrorCode.VERSION_UNPARSEABLE);
+        }
+
+        @Test
+        @DisplayName("rejects null JSON")
+        void rejectsNull() {
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", null);
+            assertThat(result.isValid()).isFalse();
+        }
+
+        @Test
+        @DisplayName("dot format version '1.0' resolves to v1 and validates")
+        void dotFormatResolvesToV1() {
+            String json = """
+                {"version":"1.0","fields":{"key_id":"rzp_123","key_secret":"sk_456"}}
+                """;
+
+            JsonValidationResult result = validationService.validateInputAnyVersion("CREDENTIAL", json);
+            assertThat(result.isValid()).isTrue();
+        }
+    }
+
+    // ── Tests: validateInputAnyVersionOrThrow ──
+
+    @Nested
+    @DisplayName("validateInputAnyVersionOrThrow()")
+    class ValidateInputAnyVersionOrThrow {
+
+        @Test
+        @DisplayName("passes for valid v1 JSON")
+        void passesForV1() {
+            String json = """
+                {"version":"1","fields":{"key_id":"rzp","key_secret":"sk"}}
+                """;
+
+            assertThatCode(() -> validationService.validateInputAnyVersionOrThrow("CREDENTIAL", json))
+                    .doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("passes for valid v3 JSON")
+        void passesForV3() {
+            String json = """
+                {"version":"3","fields":{"api_key_id":"rzp","key_secret":"sk","gateway_mode":"live"}}
+                """;
+
+            assertThatCode(() -> validationService.validateInputAnyVersionOrThrow("CREDENTIAL", json))
+                    .doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("throws for v1 JSON with wrong structure")
+        void throwsForBadV1() {
+            String json = """
+                {"version":"1","fields":{"wrong_field":"rzp"}}
+                """;
+
+            assertThatThrownBy(() -> validationService.validateInputAnyVersionOrThrow("CREDENTIAL", json))
+                    .isInstanceOf(JsonValidationException.class);
         }
     }
 }
