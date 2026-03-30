@@ -40,6 +40,11 @@ A chain-based migration and validation framework for evolving versioned JSON str
   - [JsonValidationResult](#jsonvalidationresult)
   - [JsonValidationException](#jsonvalidationexception)
 - [Migration + Validation Combined](#migration--validation-combined)
+- [Strict Input Validation (Write Path)](#strict-input-validation-write-path)
+  - [validateInput()](#validateinput)
+  - [validateInputOrThrow()](#validateinputorthrow)
+  - [validateInputForVersion()](#validateinputforversion)
+  - [Version Error Codes](#version-error-codes)
 - [Migration Recipes](#migration-recipes)
   - [Add a field](#add-a-field)
   - [Remove a field](#remove-a-field)
@@ -69,6 +74,7 @@ A chain-based migration and validation framework for evolving versioned JSON str
 - [Publishing](#publishing)
 - [Requirements](#requirements)
 - [FAQ](#faq)
+- [Flow Diagrams](#flow-diagrams)
 - [License](#license)
 
 ---
@@ -103,7 +109,8 @@ This library solves all of that with two simple patterns:
 | **Custom version path** | Default `$.version`, or use `$.schema_version`, `$.meta.v`, etc. |
 | **Works without Spring** | Manual construction supported — use anywhere |
 | **Null-safe** | Null/blank JSON returns as-is. No NPEs |
-| **43 unit tests** | Full coverage of migration, validation, edge cases |
+| **Strict input validation** | Write-path version check: exists, parseable, known, latest — then schema rules |
+| **58 unit tests** | Full coverage of migration, validation, input validation, edge cases |
 
 ---
 
@@ -1258,12 +1265,22 @@ Collects all `JsonSchemaDefinition` beans. Validates no duplicates for the same 
 
 The public validation API.
 
+**Read-path methods** (after migration — validates structure only):
+
 | Method | Description |
 |--------|-------------|
 | `validate(type, json)` | Validate against the **latest** schema. Returns `JsonValidationResult` |
 | `validate(type, version, json)` | Validate against a **specific** version's schema |
 | `validateOrThrow(type, json)` | Validate. Throws `JsonValidationException` if invalid |
 | `validateAgainst(schema, json)` | Validate against a specific `JsonSchemaDefinition` (for testing) |
+
+**Write-path methods** (before saving to DB — validates version + structure):
+
+| Method | Description |
+|--------|-------------|
+| `validateInput(type, json)` | **Strict**: checks version exists, is parseable, is known, is latest, then validates schema |
+| `validateInputOrThrow(type, json)` | Same, throws `JsonValidationException` if any check fails |
+| `validateInputForVersion(type, expectedVersion, json)` | Validates JSON declares a specific version (not just latest) |
 
 **Opt-in behavior:** If no schema is registered for a type, `validate()` returns a valid result. You only get validation when you define a schema.
 
@@ -1337,6 +1354,89 @@ String migrated = migrationService.migrateValidateOrThrow("CREDENTIAL", rawJson)
 - No `JsonValidationService` configured → returns valid
 - No schema registered for the type → returns valid
 - Schema registered but JSON passes all rules → returns valid
+
+---
+
+## Strict Input Validation (Write Path)
+
+While `validate()` only checks field rules (for read-path, after migration), `validateInput()` is a **strict gatekeeper for writes**. It ensures only valid, latest-version JSON enters your database.
+
+### `validateInput()`
+
+Runs 5 checks in sequence. Stops at the first failure:
+
+```
+Input JSON
+    │
+    ├── 1. Is JSON null/blank?           → MISSING_REQUIRED_FIELD
+    ├── 2. Does $.version exist?         → VERSION_MISSING
+    ├── 3. Is version parseable?         → VERSION_UNPARSEABLE
+    ├── 4. Is version <= latest known?   → VERSION_UNKNOWN (future version)
+    ├── 5. Is version == latest?         → VERSION_NOT_LATEST (old version)
+    └── 6. Do field rules pass?          → MISSING_REQUIRED_FIELD / TYPE_MISMATCH / FORBIDDEN_FIELD_PRESENT
+```
+
+```java
+// Before saving to DB — reject bad data at the source
+JsonValidationResult result = validationService.validateInput("CREDENTIAL", json);
+
+if (!result.isValid()) {
+    // result.getErrors().get(0).getCode() → e.g., VERSION_NOT_LATEST
+    // result.getErrors().get(0).getMessage() → "Version 2 is outdated for type 'CREDENTIAL'. Expected latest version 4."
+    throw new BadRequestException(result.getErrorSummary());
+}
+
+repository.save(json);
+```
+
+### `validateInputOrThrow()`
+
+Same 5 checks, but throws `JsonValidationException` automatically:
+
+```java
+// One line — throws if version is wrong or structure is bad
+validationService.validateInputOrThrow("CREDENTIAL", json);
+repository.save(json);  // only reached if valid
+```
+
+### `validateInputForVersion()`
+
+When you need to accept a **specific version** (not just latest) — useful during gradual rollouts:
+
+```java
+// Accept v3 specifically
+validationService.validateInputForVersion("CREDENTIAL", 3, json);
+
+// Rejects if json says "version": "2" or "version": "4" — must be exactly 3
+```
+
+### Version Error Codes
+
+| Error Code | When it fires | Example |
+|------------|--------------|---------|
+| `VERSION_MISSING` | `$.version` field doesn't exist | `{"fields": {...}}` — no version |
+| `VERSION_UNPARSEABLE` | Version is not a valid number | `{"version": "abc"}` |
+| `VERSION_UNKNOWN` | Version is higher than latest known | `{"version": "99"}` when latest is 4 |
+| `VERSION_NOT_LATEST` | Version is valid but outdated | `{"version": "2"}` when latest is 4 |
+
+**Error messages are actionable:**
+
+```
+VERSION_NOT_LATEST:
+  "Version 2 is outdated for type 'CREDENTIAL'. Expected latest version 4.
+   Migrate the JSON to the latest version before saving,
+   or use migrateValidateOrThrow() to auto-migrate."
+```
+
+### When to use which
+
+| Scenario | Method |
+|----------|--------|
+| **Reading from DB** (old data expected) | `migrateAndValidate()` or `migrateValidateOrThrow()` |
+| **Writing to DB** (must be latest) | `validateInput()` or `validateInputOrThrow()` |
+| **API input validation** (reject bad payloads) | `validateInputOrThrow()` |
+| **Accepting a specific version** | `validateInputForVersion()` |
+| **Read-path schema check only** (no version check) | `validate()` or `validateOrThrow()` |
 
 ---
 
@@ -1747,7 +1847,9 @@ json-version-migrator/
 ├── LICENSE
 ├── .gitignore
 ├── .github/workflows/publish.yml
-├── docs/index.html
+├── docs/
+│   ├── index.html                         # Library documentation page
+│   └── flow-diagrams.html                 # 11 SVG architecture & flow diagrams
 │
 ├── src/main/java/com/simplotel/jsonmigrator/
 │   │
@@ -1763,7 +1865,7 @@ json-version-migrator/
 │   │   ├── JsonFieldRule.java               # Rule: required / optional / forbidden
 │   │   ├── JsonSchemaDefinition.java        # Interface: define rules per (type, version)
 │   │   ├── JsonSchemaRegistry.java          # Collects + validates schema definitions
-│   │   ├── JsonValidationService.java       # Public API: validate JSON
+│   │   ├── JsonValidationService.java       # Public API: validate + validateInput (version check)
 │   │   ├── JsonValidationResult.java        # Result: errors list, isValid(), throwIfInvalid()
 │   │   ├── JsonValidationError.java         # Single error: code, path, message
 │   │   └── JsonValidationException.java     # RuntimeException with full result
@@ -1778,7 +1880,7 @@ json-version-migrator/
 └── src/test/java/com/simplotel/jsonmigrator/
     ├── JsonMigrationServiceTest.java        # 23 migration tests
     └── validation/
-        └── JsonValidationServiceTest.java   # 20 validation tests
+        └── JsonValidationServiceTest.java   # 35 validation + input validation tests
 ```
 
 ---
@@ -1825,13 +1927,22 @@ json-version-migrator/
 | Missing step at runtime | `IllegalStateException` | `migrateToLatest()` call |
 | Null/blank JSON | No error — returns as-is | Always |
 
-### Validation errors
+### Validation errors (schema rules)
 
 | Error code | Meaning | Example |
 |------------|---------|---------|
 | `MISSING_REQUIRED_FIELD` | Required field doesn't exist or is null | `$.fields.key_secret` is missing |
 | `TYPE_MISMATCH` | Field exists but has wrong type | `$.fields.api_key_id` is NUMBER, expected STRING |
 | `FORBIDDEN_FIELD_PRESENT` | Deprecated field still exists | `$.fields.key_id` should have been removed |
+
+### Version errors (input validation)
+
+| Error code | Meaning | Example |
+|------------|---------|---------|
+| `VERSION_MISSING` | `$.version` field doesn't exist in the JSON | `{"fields": {...}}` — no version |
+| `VERSION_UNPARSEABLE` | Version exists but can't be parsed as a number | `{"version": "abc"}` |
+| `VERSION_UNKNOWN` | Version is higher than the latest known version | `{"version": "99"}` when latest is 4 |
+| `VERSION_NOT_LATEST` | Version is valid but outdated (not the latest) | `{"version": "2"}` when latest is 4 |
 
 ### Handling validation failures
 
@@ -1962,6 +2073,24 @@ for (Row row : repository.findByVersionLessThan(latestVersion)) {
     repository.updateJson(row.getId(), migrated);
 }
 ```
+
+---
+
+## Flow Diagrams
+
+Interactive SVG flow diagrams are available at **[docs/flow-diagrams.html](docs/flow-diagrams.html)**.
+
+11 diagrams covering:
+
+| Category | Diagrams |
+|----------|----------|
+| **Architecture** | System Overview, Component Map (all 15 classes) |
+| **Read Path** | `migrateToLatest()` decision tree, `migrateAndValidate()` combined flow, Chain Resolution (v1/v2/v3/v4 entry points) |
+| **Write Path** | `validateInput()` 5-step waterfall, Save to DB flow |
+| **Lifecycle** | App Startup (discovery + chain validation), Runtime Read (DB→DTO), Runtime Write (API→DB) |
+| **Error Flows** | Broken chain detection, Validation failure details, Version error scenarios |
+
+Open in a browser for dark-themed, sidebar-navigated visual documentation.
 
 ---
 
