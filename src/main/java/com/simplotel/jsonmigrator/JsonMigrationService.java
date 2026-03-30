@@ -4,6 +4,8 @@ import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.Option;
+import com.simplotel.jsonmigrator.validation.JsonValidationResult;
+import com.simplotel.jsonmigrator.validation.JsonValidationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +41,7 @@ public class JsonMigrationService {
 
     private final JsonMigrationRegistry registry;
     private final String versionJsonPath;
+    private JsonValidationService validationService;
 
     /**
      * Creates a migration service with the default version path {@code $.version}.
@@ -58,6 +61,14 @@ public class JsonMigrationService {
     public JsonMigrationService(JsonMigrationRegistry registry, String versionJsonPath) {
         this.registry = registry;
         this.versionJsonPath = versionJsonPath;
+    }
+
+    /**
+     * Sets the validation service for {@link #migrateAndValidate(String, String)}.
+     * Called automatically by Spring auto-configuration, or manually for non-Spring usage.
+     */
+    public void setValidationService(JsonValidationService validationService) {
+        this.validationService = validationService;
     }
 
     /**
@@ -148,6 +159,66 @@ public class JsonMigrationService {
         }
         DocumentContext doc = JsonPath.using(JSON_PATH_CONFIG).parse(json);
         return readVersion(doc);
+    }
+
+    // ── Migration + Validation (combined) ──
+
+    /**
+     * Migrates JSON to latest version, then validates it against the registered schema.
+     * Returns a result containing the migrated JSON and any validation errors.
+     *
+     * <p>If no {@link JsonValidationService} is configured or no schema is registered
+     * for the type, validation is skipped and the result is always valid.</p>
+     *
+     * @param type the JSON document type
+     * @param json the raw JSON string
+     * @return the migration + validation result
+     */
+    public MigrationResult migrateAndValidate(String type, String json) {
+        String migrated = migrateToLatest(type, json);
+
+        if (validationService == null || migrated == null || migrated.isBlank()) {
+            return new MigrationResult(migrated, JsonValidationResult.valid());
+        }
+
+        JsonValidationResult validation = validationService.validate(type, migrated);
+        return new MigrationResult(migrated, validation);
+    }
+
+    /**
+     * Migrates to latest and throws if validation fails.
+     *
+     * @param type the JSON document type
+     * @param json the raw JSON string
+     * @return the migrated JSON string
+     * @throws com.simplotel.jsonmigrator.validation.JsonValidationException if validation fails
+     */
+    public String migrateValidateOrThrow(String type, String json) {
+        MigrationResult result = migrateAndValidate(type, json);
+        result.getValidation().throwIfInvalid(type);
+        return result.getJson();
+    }
+
+    /**
+     * Holds the result of migration + validation together.
+     */
+    public static class MigrationResult {
+        private final String json;
+        private final JsonValidationResult validation;
+
+        public MigrationResult(String json, JsonValidationResult validation) {
+            this.json = json;
+            this.validation = validation;
+        }
+
+        /** The migrated JSON string. */
+        public String getJson() { return json; }
+
+        /** The validation result (check {@code isValid()} before using the JSON). */
+        public JsonValidationResult getValidation() { return validation; }
+
+        /** Shorthand: true if validation passed or was skipped. */
+        public boolean isValid() { return validation.isValid(); }
     }
 
     private int readVersion(DocumentContext doc) {
