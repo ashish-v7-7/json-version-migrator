@@ -87,6 +87,145 @@ That's it. When a v1 JSON is read, the framework automatically applies v1→v2 (
 
 ---
 
+## Real-World Example: Hotel Payment Gateway Credentials
+
+Imagine you run a hotel payments platform. Each hotel stores its payment gateway credentials as JSON in a `credential` column:
+
+### The starting point (v1)
+
+A hotel's Razorpay credential is stored in the database as:
+
+```json
+{
+  "version": "1.0",
+  "fields": {
+    "key_id": "rzp_live_abc123",
+    "key_secret": "sk_live_xyz789"
+  }
+}
+```
+
+Over time, requirements change:
+- **v2**: Business wants to track whether credentials are for live or test mode → add `gateway_mode`
+- **v3**: API naming standardization → rename `key_id` to `api_key_id`
+- **v4**: New feature needs a webhook secret, and the old `legacy_token` field should be cleaned up
+
+### Step 1: Define your type constants
+
+```java
+public final class JsonTypes {
+    private JsonTypes() {}
+    public static final String CREDENTIAL = "CREDENTIAL";
+}
+```
+
+### Step 2: Write one migration per version step
+
+```java
+// V1 → V2: Add "gateway_mode" field with default "live"
+@Component
+public class CredentialV1ToV2 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.CREDENTIAL; }
+    @Override public int fromVersion()  { return 1; }
+    @Override public int toVersion()    { return 2; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        doc.put("$.fields", "gateway_mode", "live");
+    }
+}
+```
+
+```java
+// V2 → V3: Rename "key_id" to "api_key_id"
+@Component
+public class CredentialV2ToV3 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.CREDENTIAL; }
+    @Override public int fromVersion()  { return 2; }
+    @Override public int toVersion()    { return 3; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        Object keyId = doc.read("$.fields.key_id");
+        if (keyId != null) {
+            doc.put("$.fields", "api_key_id", keyId);
+            doc.delete("$.fields.key_id");
+        }
+    }
+}
+```
+
+```java
+// V3 → V4: Add "webhook_secret", remove deprecated "legacy_token"
+@Component
+public class CredentialV3ToV4 extends AbstractJsonVersionMigration {
+
+    @Override public String jsonType()  { return JsonTypes.CREDENTIAL; }
+    @Override public int fromVersion()  { return 3; }
+    @Override public int toVersion()    { return 4; }
+
+    @Override
+    protected void applyChanges(DocumentContext doc) {
+        doc.put("$.fields", "webhook_secret", "");
+        try { doc.delete("$.fields.legacy_token"); } catch (Exception ignored) {}
+    }
+}
+```
+
+### Step 3: Use in your service
+
+```java
+@Service
+public class PaymentGatewayService {
+
+    private final JsonMigrationService migrationService;
+    private final ObjectMapper objectMapper;
+    private final CredentialRepository credentialRepository;
+
+    public GatewayCredential getCredential(String hotelId) {
+        // 1. Read raw JSON from database
+        String rawJson = credentialRepository.findByHotelId(hotelId).getCredentialJson();
+        // rawJson = {"version":"1.0","fields":{"key_id":"rzp_live_abc123","key_secret":"sk_live_xyz789"}}
+
+        // 2. One line — migrates v1 → v2 → v3 → v4 automatically
+        String migrated = migrationService.migrateToLatest(JsonTypes.CREDENTIAL, rawJson);
+        // migrated = {"version":"4","fields":{"api_key_id":"rzp_live_abc123","key_secret":"sk_live_xyz789","gateway_mode":"live","webhook_secret":""}}
+
+        // 3. Deserialize into your current DTO — no version mismatch, no missing fields
+        return objectMapper.readValue(migrated, GatewayCredential.class);
+    }
+}
+```
+
+### What just happened?
+
+The hotel's credential was stored 6 months ago as v1. When the service reads it today, the framework automatically:
+
+```
+DB Row                          In Memory
+┌─────────────────────┐
+│ version: "1.0"      │──→ V1→V2: add gateway_mode="live"
+│ key_id: "rzp_..."   │──→ V2→V3: rename key_id → api_key_id
+│ key_secret: "sk_..."│──→ V3→V4: add webhook_secret, remove legacy_token
+└─────────────────────┘
+                                ┌──────────────────────────┐
+                                │ version: "4"             │
+                                │ api_key_id: "rzp_..."    │
+                                │ key_secret: "sk_..."     │
+                                │ gateway_mode: "live"     │
+                                │ webhook_secret: ""       │
+                                └──────────────────────────┘
+```
+
+- **No batch migration scripts** — old rows are migrated on-the-fly when read
+- **No downtime** — deploy the new code and it just works
+- **No DB writes** — the original row is untouched (write back explicitly if you want)
+- **New hotels** get v4 format from day one — the migration chain is only for old data
+
+---
+
 ## How It Works
 
 ```
