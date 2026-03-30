@@ -45,6 +45,8 @@ A chain-based migration and validation framework for evolving versioned JSON str
   - [validateInputOrThrow()](#validateinputorthrow)
   - [validateInputForVersion()](#validateinputforversion)
   - [Version Error Codes](#version-error-codes)
+- [Typed POJO Return (Optional Deserialization)](#typed-pojo-return-optional-deserialization)
+- [Schema Package Structure (Per-Version Schemas)](#schema-package-structure-per-version-schemas)
 - [Migration Recipes](#migration-recipes)
   - [Add a field](#add-a-field)
   - [Remove a field](#remove-a-field)
@@ -1437,6 +1439,210 @@ VERSION_NOT_LATEST:
 | **API input validation** (reject bad payloads) | `validateInputOrThrow()` |
 | **Accepting a specific version** | `validateInputForVersion()` |
 | **Read-path schema check only** (no version check) | `validate()` or `validateOrThrow()` |
+
+---
+
+## Typed POJO Return (Optional Deserialization)
+
+By default, all migration methods return a `String` (migrated JSON). You can optionally get a **typed POJO** back by passing a `JsonDeserializer`:
+
+### Return JSON (default)
+
+```java
+String json = migrationService.migrateToLatest("CREDENTIAL", rawJson);
+// json = migrated JSON string — you deserialize manually
+GatewayCredential cred = objectMapper.readValue(json, GatewayCredential.class);
+```
+
+### Return POJO (one call)
+
+```java
+// Migrate + deserialize in one call — returns typed POJO directly
+GatewayCredential cred = migrationService.migrateToLatest(
+    "CREDENTIAL", rawJson,
+    json -> objectMapper.readValue(json, GatewayCredential.class));
+```
+
+### Return POJO with validation
+
+```java
+// Migrate + validate + deserialize — returns TypedMigrationResult<T>
+TypedMigrationResult<GatewayCredential> result = migrationService.migrateAndValidate(
+    "CREDENTIAL", rawJson,
+    json -> objectMapper.readValue(json, GatewayCredential.class));
+
+if (result.isValid()) {
+    GatewayCredential cred = result.getValue();    // typed POJO
+} else {
+    log.error("Bad data: {}", result.getValidation().getErrorSummary());
+}
+
+// Or with fallback:
+GatewayCredential cred = result.getValueOrDefault(GatewayCredential.builder().build());
+```
+
+### Migrate + validate + throw + return POJO
+
+```java
+// One line: migrate → validate → throw if invalid → return POJO
+GatewayCredential cred = migrationService.migrateValidateOrThrow(
+    "CREDENTIAL", rawJson,
+    json -> objectMapper.readValue(json, GatewayCredential.class));
+```
+
+### Using `JacksonDeserializer` helper
+
+If you use Jackson (which Spring Boot always has), use the convenience helper:
+
+```java
+import com.simplotel.jsonmigrator.JacksonDeserializer;
+
+// Create once, reuse
+JsonDeserializer<GatewayCredential> credDeserializer =
+    JacksonDeserializer.create(objectMapper, GatewayCredential.class);
+
+// Use anywhere
+GatewayCredential cred = migrationService.migrateToLatest("CREDENTIAL", rawJson, credDeserializer);
+```
+
+### All typed methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `migrateToLatest(type, json, deserializer)` | `T` | Migrate + deserialize |
+| `migrateAndValidate(type, json, deserializer)` | `TypedMigrationResult<T>` | Migrate + validate + deserialize |
+| `migrateValidateOrThrow(type, json, deserializer)` | `T` | Migrate + validate (throw if invalid) + deserialize |
+
+All typed methods return `null` if input JSON is `null`/blank. Deserialization errors are wrapped as `RuntimeException`.
+
+### `JsonDeserializer<T>` interface
+
+A simple functional interface — framework agnostic (no Jackson dependency in the library):
+
+```java
+@FunctionalInterface
+public interface JsonDeserializer<T> {
+    T deserialize(String json) throws Exception;
+}
+```
+
+Works with any JSON library:
+
+```java
+// Jackson
+json -> objectMapper.readValue(json, MyDto.class)
+
+// Gson
+json -> gson.fromJson(json, MyDto.class)
+
+// Custom
+json -> new MyDto(JsonPath.parse(json).read("$.name"))
+```
+
+---
+
+## Schema Package Structure (Per-Version Schemas)
+
+To validate JSON at **any version** (not just latest), define a `JsonSchemaDefinition` for each version. Organize schemas in a `schema/` sub-package grouped by type:
+
+### Recommended structure
+
+```
+src/main/java/com/yourcompany/migration/
+├── JsonTypes.java                       # String constants
+├── credential/                          # Migrations
+│   ├── CredentialV1ToV2.java
+│   └── CredentialV2ToV3.java
+├── schema/                              # Schemas (all versions)
+│   ├── credential/
+│   │   ├── CredentialV1Schema.java      # v1: key_id, key_secret
+│   │   ├── CredentialV2Schema.java      # v2: + gateway_mode
+│   │   └── CredentialV3Schema.java      # v3: rename key_id → api_key_id
+│   └── branding/
+│       └── BrandingV1Schema.java        # v1: logo, theme, name
+```
+
+### Example: All credential schemas
+
+**V1 (launch):**
+```java
+@Component
+public class CredentialV1Schema implements JsonSchemaDefinition {
+    public String jsonType() { return "CREDENTIAL"; }
+    public int version()     { return 1; }
+
+    public List<JsonFieldRule> rules() {
+        return List.of(
+            JsonFieldRule.required("$.version", FieldType.STRING),
+            JsonFieldRule.required("$.fields", FieldType.OBJECT),
+            JsonFieldRule.required("$.fields.key_id", FieldType.STRING),
+            JsonFieldRule.required("$.fields.key_secret", FieldType.STRING)
+        );
+    }
+}
+```
+
+**V2 (added gateway_mode):**
+```java
+@Component
+public class CredentialV2Schema implements JsonSchemaDefinition {
+    public String jsonType() { return "CREDENTIAL"; }
+    public int version()     { return 2; }
+
+    public List<JsonFieldRule> rules() {
+        return List.of(
+            JsonFieldRule.required("$.version", FieldType.STRING),
+            JsonFieldRule.required("$.fields", FieldType.OBJECT),
+            JsonFieldRule.required("$.fields.key_id", FieldType.STRING),
+            JsonFieldRule.required("$.fields.key_secret", FieldType.STRING),
+            JsonFieldRule.required("$.fields.gateway_mode", FieldType.STRING)
+        );
+    }
+}
+```
+
+**V3 (latest — renamed key_id, removed legacy_token):**
+```java
+@Component
+public class CredentialV3Schema implements JsonSchemaDefinition {
+    public String jsonType() { return "CREDENTIAL"; }
+    public int version()     { return 3; }
+
+    public List<JsonFieldRule> rules() {
+        return List.of(
+            JsonFieldRule.required("$.version", FieldType.STRING),
+            JsonFieldRule.required("$.fields", FieldType.OBJECT),
+            JsonFieldRule.required("$.fields.api_key_id", FieldType.STRING),
+            JsonFieldRule.required("$.fields.key_secret", FieldType.STRING),
+            JsonFieldRule.required("$.fields.gateway_mode", FieldType.STRING),
+            JsonFieldRule.forbidden("$.fields.key_id"),          // renamed in v3
+            JsonFieldRule.forbidden("$.fields.legacy_token")     // removed in v3
+        );
+    }
+}
+```
+
+### How it works with `validateInputAnyVersion()`
+
+```java
+String v1Json = """
+    {"version":"1","fields":{"key_id":"rzp_123","key_secret":"sk_456"}}
+    """;
+validationService.validateInputAnyVersionOrThrow("CREDENTIAL", v1Json);
+// ✓ reads version=1, finds CredentialV1Schema, validates against it
+
+String v3Json = """
+    {"version":"3","fields":{"api_key_id":"rzp_123","key_secret":"sk_456","gateway_mode":"live"}}
+    """;
+validationService.validateInputAnyVersionOrThrow("CREDENTIAL", v3Json);
+// ✓ reads version=3, finds CredentialV3Schema, validates against it
+
+String v1WithV3Structure = """
+    {"version":"1","fields":{"api_key_id":"rzp_123","key_secret":"sk_456"}}
+    """;
+validationService.validateInputAnyVersionOrThrow("CREDENTIAL", v1WithV3Structure);
+// ✗ FAILS — v1 schema requires $.fields.key_id which is missing
+```
 
 ---
 

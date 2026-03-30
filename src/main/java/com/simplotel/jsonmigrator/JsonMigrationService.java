@@ -199,6 +199,90 @@ public class JsonMigrationService {
         return result.getJson();
     }
 
+    // ── Typed POJO return methods ──
+
+    /**
+     * Migrates JSON to latest version and deserializes into a typed POJO.
+     *
+     * <pre>{@code
+     * GatewayCredential cred = migrationService.migrateToLatest(
+     *     "CREDENTIAL", rawJson, json -> objectMapper.readValue(json, GatewayCredential.class));
+     * }</pre>
+     *
+     * @param type         the JSON document type
+     * @param json         the raw JSON string
+     * @param deserializer function to convert migrated JSON → POJO
+     * @param <T>          the target POJO type
+     * @return the deserialized POJO, or null if input was null/blank
+     */
+    public <T> T migrateToLatest(String type, String json, JsonDeserializer<T> deserializer) {
+        String migrated = migrateToLatest(type, json);
+        if (migrated == null || migrated.isBlank()) {
+            return null;
+        }
+        return deserializeOrThrow(migrated, deserializer);
+    }
+
+    /**
+     * Migrates to latest, validates, and deserializes into a typed result.
+     *
+     * <pre>{@code
+     * TypedMigrationResult<GatewayCredential> result = migrationService.migrateAndValidate(
+     *     "CREDENTIAL", rawJson, json -> objectMapper.readValue(json, GatewayCredential.class));
+     *
+     * if (result.isValid()) {
+     *     GatewayCredential cred = result.getValue();  // typed POJO
+     * }
+     * }</pre>
+     *
+     * @param type         the JSON document type
+     * @param json         the raw JSON string
+     * @param deserializer function to convert migrated JSON → POJO
+     * @param <T>          the target POJO type
+     * @return typed migration result with POJO + validation
+     */
+    public <T> TypedMigrationResult<T> migrateAndValidate(String type, String json, JsonDeserializer<T> deserializer) {
+        MigrationResult result = migrateAndValidate(type, json);
+        T value = null;
+        if (result.getJson() != null && !result.getJson().isBlank()) {
+            value = deserializeOrThrow(result.getJson(), deserializer);
+        }
+        return new TypedMigrationResult<>(result.getJson(), result.getValidation(), value);
+    }
+
+    /**
+     * Migrates to latest, validates (throws if invalid), and returns a typed POJO.
+     *
+     * <pre>{@code
+     * GatewayCredential cred = migrationService.migrateValidateOrThrow(
+     *     "CREDENTIAL", rawJson, json -> objectMapper.readValue(json, GatewayCredential.class));
+     * }</pre>
+     *
+     * @param type         the JSON document type
+     * @param json         the raw JSON string
+     * @param deserializer function to convert migrated JSON → POJO
+     * @param <T>          the target POJO type
+     * @return the deserialized POJO (only returned if validation passed)
+     * @throws com.simplotel.jsonmigrator.validation.JsonValidationException if validation fails
+     */
+    public <T> T migrateValidateOrThrow(String type, String json, JsonDeserializer<T> deserializer) {
+        String migrated = migrateValidateOrThrow(type, json);
+        if (migrated == null || migrated.isBlank()) {
+            return null;
+        }
+        return deserializeOrThrow(migrated, deserializer);
+    }
+
+    private <T> T deserializeOrThrow(String json, JsonDeserializer<T> deserializer) {
+        try {
+            return deserializer.deserialize(json);
+        } catch (Exception e) {
+            throw new RuntimeException("json-migrator: deserialization failed — " + e.getMessage(), e);
+        }
+    }
+
+    // ── Result classes ──
+
     /**
      * Holds the result of migration + validation together.
      */
@@ -219,6 +303,33 @@ public class JsonMigrationService {
 
         /** Shorthand: true if validation passed or was skipped. */
         public boolean isValid() { return validation.isValid(); }
+    }
+
+    /**
+     * Typed result containing migrated JSON, validation result, and the deserialized POJO.
+     *
+     * @param <T> the POJO type
+     */
+    public static class TypedMigrationResult<T> extends MigrationResult {
+        private final T value;
+
+        public TypedMigrationResult(String json, JsonValidationResult validation, T value) {
+            super(json, validation);
+            this.value = value;
+        }
+
+        /** The deserialized POJO (may be null if input was null/blank). */
+        public T getValue() { return value; }
+
+        /**
+         * Returns the POJO if valid, otherwise returns the provided default.
+         *
+         * @param defaultValue the fallback value if validation failed or value is null
+         * @return the POJO or defaultValue
+         */
+        public T getValueOrDefault(T defaultValue) {
+            return (isValid() && value != null) ? value : defaultValue;
+        }
     }
 
     private int readVersion(DocumentContext doc) {

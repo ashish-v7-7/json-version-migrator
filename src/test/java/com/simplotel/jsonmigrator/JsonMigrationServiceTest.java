@@ -381,4 +381,135 @@ class JsonMigrationServiceTest {
             assertThat(doc.read("$.extra", String.class)).isEqualTo("added");
         }
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // Tests: Typed POJO return
+    // ──────────────────────────────────────────────────────────────
+
+    /** Simple POJO for testing deserialization */
+    public static class SimpleConfig {
+        public String version;
+        public String new_field;
+        public String display_name;
+    }
+
+    /** Minimal JSON→POJO deserializer using JsonPath (no Jackson needed in tests) */
+    static final JsonDeserializer<SimpleConfig> SIMPLE_DESERIALIZER = json -> {
+        DocumentContext doc = JsonPath.parse(json);
+        SimpleConfig cfg = new SimpleConfig();
+        cfg.version = doc.read("$.version", String.class);
+        try { cfg.new_field = doc.read("$.new_field", String.class); } catch (Exception e) { /* optional */ }
+        try { cfg.display_name = doc.read("$.display_name", String.class); } catch (Exception e) { /* optional */ }
+        return cfg;
+    };
+
+    @Nested
+    @DisplayName("Typed POJO return — migrateToLatest(type, json, deserializer)")
+    class TypedMigrateToLatest {
+
+        @Test
+        @DisplayName("returns typed POJO after migration")
+        void returnsPojo() {
+            String v1 = """
+                {"version":"1.0","name":"hello"}
+                """;
+
+            SimpleConfig cfg = service.migrateToLatest("CONFIG", v1, SIMPLE_DESERIALIZER);
+
+            assertThat(cfg).isNotNull();
+            assertThat(cfg.version).isEqualTo("4");
+            assertThat(cfg.new_field).isEqualTo("default_value");
+            assertThat(cfg.display_name).isEqualTo("hello");
+        }
+
+        @Test
+        @DisplayName("returns null for null input")
+        void returnsNullForNull() {
+            SimpleConfig cfg = service.migrateToLatest("CONFIG", null, SIMPLE_DESERIALIZER);
+            assertThat(cfg).isNull();
+        }
+
+        @Test
+        @DisplayName("wraps deserialization error as RuntimeException")
+        void wrapsDeserializationError() {
+            JsonDeserializer<SimpleConfig> broken = json -> { throw new Exception("parse error"); };
+
+            assertThatThrownBy(() -> service.migrateToLatest("CONFIG", "{\"version\":\"1\"}", broken))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("deserialization failed");
+        }
+    }
+
+    @Nested
+    @DisplayName("Typed POJO return — migrateAndValidate(type, json, deserializer)")
+    class TypedMigrateAndValidate {
+
+        @Test
+        @DisplayName("returns TypedMigrationResult with POJO")
+        void returnsTypedResult() {
+            String v1 = """
+                {"version":"1.0","name":"hello"}
+                """;
+
+            JsonMigrationService.TypedMigrationResult<SimpleConfig> result =
+                    service.migrateAndValidate("CONFIG", v1, SIMPLE_DESERIALIZER);
+
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.getValue()).isNotNull();
+            assertThat(result.getValue().version).isEqualTo("4");
+            assertThat(result.getJson()).contains("\"version\":\"4\"");
+        }
+
+        @Test
+        @DisplayName("getValue() available even when validation fails (no schema)")
+        void valueAvailableWithoutSchema() {
+            // "CONFIG" type has no schema registered, so validation is always valid
+            String v1 = """
+                {"version":"1.0","name":"test"}
+                """;
+
+            JsonMigrationService.TypedMigrationResult<SimpleConfig> result =
+                    service.migrateAndValidate("CONFIG", v1, SIMPLE_DESERIALIZER);
+
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.getValue().new_field).isEqualTo("default_value");
+        }
+
+        @Test
+        @DisplayName("getValueOrDefault returns default when value is null")
+        void getValueOrDefaultForNull() {
+            JsonMigrationService.TypedMigrationResult<SimpleConfig> result =
+                    service.migrateAndValidate("CONFIG", null, SIMPLE_DESERIALIZER);
+
+            SimpleConfig fallback = new SimpleConfig();
+            fallback.version = "0";
+
+            assertThat(result.getValueOrDefault(fallback).version).isEqualTo("0");
+        }
+    }
+
+    @Nested
+    @DisplayName("Typed POJO return — migrateValidateOrThrow(type, json, deserializer)")
+    class TypedMigrateValidateOrThrow {
+
+        @Test
+        @DisplayName("returns POJO directly when valid")
+        void returnsPojo() {
+            String v1 = """
+                {"version":"1.0","name":"hello"}
+                """;
+
+            SimpleConfig cfg = service.migrateValidateOrThrow("CONFIG", v1, SIMPLE_DESERIALIZER);
+
+            assertThat(cfg).isNotNull();
+            assertThat(cfg.version).isEqualTo("4");
+        }
+
+        @Test
+        @DisplayName("returns null for null input")
+        void nullInput() {
+            SimpleConfig cfg = service.migrateValidateOrThrow("CONFIG", null, SIMPLE_DESERIALIZER);
+            assertThat(cfg).isNull();
+        }
+    }
 }
