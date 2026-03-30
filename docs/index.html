@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSON Version Migrator - Documentation</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2129;
+    --surface3: #21262d;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --yellow: #e3b341;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 280px; background: var(--surface); border-right: 1px solid var(--border);
+    padding: 24px 16px; position: fixed; height: 100vh; overflow-y: auto;
+  }
+  .sidebar h2 { font-size: 15px; color: var(--accent); margin-bottom: 2px; font-weight: 600; }
+  .sidebar .subtitle { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; display: block; }
+  .sidebar .version-badge {
+    display: inline-block; font-size: 10px; background: var(--green); color: #0d1117;
+    padding: 2px 8px; border-radius: 12px; font-weight: 600; margin-bottom: 20px;
+  }
+  .sidebar .nav-group { margin-bottom: 18px; }
+  .sidebar .nav-group h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-muted); margin-bottom: 8px; padding-left: 10px;
+  }
+  .sidebar a {
+    display: block; padding: 5px 10px; border-radius: 6px;
+    color: var(--text); text-decoration: none; font-size: 13px; transition: background 0.15s;
+  }
+  .sidebar a:hover { background: var(--surface2); color: var(--accent); }
+  .sidebar a.active { background: rgba(88,166,255,0.1); color: var(--accent); font-weight: 500; }
+  .sidebar .gh-link {
+    margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+  }
+  .sidebar .gh-link a {
+    display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px;
+  }
+  .sidebar .gh-link a:hover { color: var(--accent); background: none; }
+
+  /* Main */
+  .main { margin-left: 280px; padding: 48px 56px; max-width: 920px; flex: 1; }
+
+  /* Typography */
+  h1 { font-size: 30px; font-weight: 700; margin-bottom: 8px; color: #f0f6fc; }
+  .hero-desc { font-size: 16px; color: var(--text-muted); margin-bottom: 40px; line-height: 1.8; }
+  h2 { font-size: 21px; font-weight: 600; margin: 48px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: #f0f6fc; }
+  h3 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; color: #e6edf3; }
+  h4 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+  p { margin-bottom: 14px; }
+  ul, ol { margin: 0 0 14px 24px; }
+  li { margin-bottom: 5px; }
+
+  /* Code */
+  pre {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 22px; overflow-x: auto; font-size: 13px; line-height: 1.55;
+    margin: 14px 0 22px; position: relative;
+  }
+  pre .lang { position: absolute; top: 8px; right: 12px; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace; font-size: 13px;
+  }
+  p code, li code, td code {
+    background: var(--surface2); padding: 2px 7px; border-radius: 4px; font-size: 12px; color: var(--cyan);
+  }
+
+  /* Syntax */
+  .kw { color: var(--red); }
+  .type { color: var(--cyan); }
+  .str { color: #a5d6ff; }
+  .cmt { color: var(--text-muted); font-style: italic; }
+  .ann { color: var(--purple); }
+  .num { color: var(--orange); }
+  .fn { color: #d2a8ff; }
+  .field { color: #ffa657; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0 22px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px; transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .icon { font-size: 24px; margin-bottom: 10px; display: block; }
+  .card h4 { margin: 0 0 4px; color: #e6edf3; text-transform: none; letter-spacing: 0; font-size: 14px; }
+  .card p { font-size: 13px; color: var(--text-muted); margin: 0; }
+
+  /* Callouts */
+  .callout { border-radius: 8px; padding: 14px 18px; margin: 14px 0 22px; border-left: 4px solid; font-size: 13px; }
+  .callout.info { background: rgba(88,166,255,0.08); border-color: var(--accent); }
+  .callout.warn { background: rgba(210,153,34,0.08); border-color: var(--orange); }
+  .callout.danger { background: rgba(248,81,73,0.08); border-color: var(--red); }
+  .callout.success { background: rgba(63,185,80,0.08); border-color: var(--green); }
+  .callout strong { display: block; margin-bottom: 3px; }
+  .callout.info strong { color: var(--accent); }
+  .callout.warn strong { color: var(--orange); }
+  .callout.danger strong { color: var(--red); }
+  .callout.success strong { color: var(--green); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13px; }
+  th { background: var(--surface2); text-align: left; padding: 9px 14px; font-weight: 600; border-bottom: 2px solid var(--border); }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+
+  /* Flow */
+  .flow { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; margin: 18px 0 24px; }
+  .flow-box {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; font-weight: 500; text-align: center; min-width: 90px;
+  }
+  .flow-box.hl { border-color: var(--accent); background: rgba(88,166,255,0.1); color: var(--accent); }
+  .flow-box.ok { border-color: var(--green); background: rgba(63,185,80,0.1); color: var(--green); }
+  .flow-arrow { color: var(--text-muted); font-size: 18px; margin: 0 5px; }
+
+  /* Steps */
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: #0d1117; font-size: 12px; font-weight: 700;
+    margin-right: 10px; flex-shrink: 0;
+  }
+  .step { display: flex; align-items: flex-start; margin-bottom: 16px; }
+  .step-content { flex: 1; }
+  .step-content h4 { margin-top: 2px; }
+
+  /* Tags */
+  .tag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-right: 4px; }
+  .tag.blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag.green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag.orange { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .tag.purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+
+  /* Copy button */
+  .copy-btn {
+    position: absolute; top: 8px; right: 8px; background: var(--surface3); border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+    transition: all 0.15s; opacity: 0;
+  }
+  pre:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Responsive */
+  @media (max-width: 1000px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 28px 20px; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <h2>json-version-migrator</h2>
+  <span class="subtitle">Spring Boot Starter</span>
+  <span class="version-badge">v1.0.0</span>
+
+  <div class="nav-group">
+    <h3>Getting Started</h3>
+    <a href="#install">Installation</a>
+    <a href="#quick">Quick Start (3 steps)</a>
+    <a href="#how-it-works">How It Works</a>
+  </div>
+  <div class="nav-group">
+    <h3>API Reference</h3>
+    <a href="#interface">JsonVersionMigration</a>
+    <a href="#abstract">AbstractJsonVersionMigration</a>
+    <a href="#registry">JsonMigrationRegistry</a>
+    <a href="#service">JsonMigrationService</a>
+  </div>
+  <div class="nav-group">
+    <h3>Recipes</h3>
+    <a href="#add-field">Add Field</a>
+    <a href="#remove-field">Remove Field</a>
+    <a href="#rename-field">Rename Field</a>
+    <a href="#restructure">Restructure</a>
+  </div>
+  <div class="nav-group">
+    <h3>Guides</h3>
+    <a href="#spring-boot">Spring Boot Usage</a>
+    <a href="#non-spring">Non-Spring Usage</a>
+    <a href="#custom-path">Custom Version Path</a>
+    <a href="#naming">Naming Convention</a>
+    <a href="#version-format">Version Format</a>
+  </div>
+  <div class="nav-group">
+    <h3>Reference</h3>
+    <a href="#rules">Rules &amp; Constraints</a>
+    <a href="#testing">Testing</a>
+    <a href="#faq">FAQ</a>
+  </div>
+  <div class="gh-link">
+    <a href="https://github.com/ashish-v7-7/json-version-migrator" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<main class="main">
+
+  <h1>JSON Version Migrator</h1>
+  <p class="hero-desc">
+    Chain-based migration framework for evolving versioned JSON stored in database columns.
+    Auto-migrates any old version to the latest schema on read.
+    Works as a Spring Boot starter or standalone.
+  </p>
+
+  <div class="card-grid">
+    <div class="card">
+      <span class="icon">&#9939;</span>
+      <h4>Chain-Based</h4>
+      <p>Each migration handles one step (v1&rarr;v2). The framework chains them to jump multiple versions.</p>
+    </div>
+    <div class="card">
+      <span class="icon">&#9881;</span>
+      <h4>Auto-Discovery</h4>
+      <p>Drop a <code>@Component</code> class. Spring picks it up. No registration needed.</p>
+    </div>
+    <div class="card">
+      <span class="icon">&#128737;</span>
+      <h4>Fail-Fast Validation</h4>
+      <p>Missing steps in the chain = app won't start. No silent runtime failures.</p>
+    </div>
+    <div class="card">
+      <span class="icon">&#128218;</span>
+      <h4>Read-Only Migration</h4>
+      <p>DB rows stay untouched. Migration happens in memory on read. Zero downtime.</p>
+    </div>
+  </div>
+
+  <!-- INSTALL -->
+  <h2 id="install">Installation</h2>
+
+  <h3>Maven (GitHub Packages)</h3>
+  <pre><code><span class="lang">xml</span>&lt;<span class="kw">dependency</span>&gt;
+    &lt;<span class="field">groupId</span>&gt;com.simplotel&lt;/<span class="field">groupId</span>&gt;
+    &lt;<span class="field">artifactId</span>&gt;json-version-migrator-spring-boot-starter&lt;/<span class="field">artifactId</span>&gt;
+    &lt;<span class="field">version</span>&gt;1.0.0&lt;/<span class="field">version</span>&gt;
+&lt;/<span class="kw">dependency</span>&gt;</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+
+  <h3>Gradle</h3>
+  <pre><code><span class="lang">groovy</span><span class="fn">implementation</span> <span class="str">'com.simplotel:json-version-migrator-spring-boot-starter:1.0.0'</span></code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+
+  <h3>Configure GitHub Packages registry</h3>
+  <p>Add to your Maven <code>settings.xml</code>:</p>
+  <pre><code><span class="lang">xml</span>&lt;<span class="kw">server</span>&gt;
+    &lt;<span class="field">id</span>&gt;github&lt;/<span class="field">id</span>&gt;
+    &lt;<span class="field">username</span>&gt;YOUR_GITHUB_USERNAME&lt;/<span class="field">username</span>&gt;
+    &lt;<span class="field">password</span>&gt;YOUR_GITHUB_TOKEN&lt;/<span class="field">password</span>&gt;
+&lt;/<span class="kw">server</span>&gt;</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+  <p>And add the repository to your <code>pom.xml</code>:</p>
+  <pre><code><span class="lang">xml</span>&lt;<span class="kw">repositories</span>&gt;
+    &lt;<span class="kw">repository</span>&gt;
+        &lt;<span class="field">id</span>&gt;github&lt;/<span class="field">id</span>&gt;
+        &lt;<span class="field">url</span>&gt;https://maven.pkg.github.com/ashish-v7-7/json-version-migrator&lt;/<span class="field">url</span>&gt;
+    &lt;/<span class="kw">repository</span>&gt;
+&lt;/<span class="kw">repositories</span>&gt;</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+
+  <!-- QUICK START -->
+  <h2 id="quick">Quick Start</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    <div class="step-content">
+      <h4>Add the dependency</h4>
+      <p>Add the Maven/Gradle dependency shown above.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    <div class="step-content">
+      <h4>Create a migration class</h4>
+    </div>
+  </div>
+
+  <pre><code><span class="lang">java</span><span class="ann">@Component</span>
+<span class="kw">public class</span> <span class="type">CredentialV1ToV2</span> <span class="kw">extends</span> <span class="type">AbstractJsonVersionMigration</span> {
+
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> <span class="type">String</span> <span class="fn">jsonType</span>()  { <span class="kw">return</span> <span class="str">"CREDENTIAL"</span>; }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public int</span> <span class="fn">fromVersion</span>() { <span class="kw">return</span> <span class="num">1</span>; }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public int</span> <span class="fn">toVersion</span>()   { <span class="kw">return</span> <span class="num">2</span>; }
+
+    <span class="ann">@Override</span>
+    <span class="kw">protected void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc) {
+        doc.<span class="fn">put</span>(<span class="str">"$.fields"</span>, <span class="str">"gateway_mode"</span>, <span class="str">"live"</span>);
+    }
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    <div class="step-content">
+      <h4>Inject and use</h4>
+    </div>
+  </div>
+
+  <pre><code><span class="lang">java</span><span class="ann">@Service</span>
+<span class="kw">public class</span> <span class="type">MyService</span> {
+
+    <span class="kw">private final</span> <span class="type">JsonMigrationService</span> <span class="field">migrationService</span>;
+
+    <span class="kw">public</span> <span class="type">Config</span> <span class="fn">readConfig</span>(<span class="type">String</span> rawJson) {
+        <span class="type">String</span> migrated = migrationService.<span class="fn">migrateToLatest</span>(<span class="str">"CREDENTIAL"</span>, rawJson);
+        <span class="kw">return</span> objectMapper.<span class="fn">readValue</span>(migrated, <span class="type">Config</span>.<span class="kw">class</span>);
+    }
+}</code><button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>
+
+  <div class="callout success">
+    <strong>That's it!</strong>
+    When v1 JSON is read, the framework applies v1&rarr;v2 automatically. Add more steps and it chains them: v1&rarr;v2&rarr;v3&rarr;...&rarr;latest.
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <h2 id="how-it-works">How It Works</h2>
+
+  <div class="flow">
+    <div class="flow-box">DB Row<br><small>v1 JSON</small></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-box hl">migrateToLatest()</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-box">v1&rarr;v2</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-box">v2&rarr;v3</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-box ok">v3 JSON</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-box">Deserialize</div>
+  </div>
+
+  <ol>
+    <li>Service calls <code>migrateToLatest("CREDENTIAL", rawJson)</code></li>
+    <li>Framework reads <code>$.version</code> from the JSON &rarr; e.g., <code>1</code></li>
+    <li>Registry looks up the latest version for "CREDENTIAL" &rarr; e.g., <code>3</code></li>
+    <li>Registry builds the chain: [V1&rarr;V2, V2&rarr;V3]</li>
+    <li>Each step mutates the <code>DocumentContext</code> in sequence</li>
+    <li>Returns the migrated JSON string (with <code>"version": "3"</code>)</li>
+  </ol>
+
+  <div class="callout info">
+    <strong>Read-only</strong>
+    The database row is never modified. Migration happens in memory. If you want to persist the migrated version, write it back explicitly.
+  </div>
+
+  <!-- API REFERENCE -->
+  <h2 id="interface">JsonVersionMigration (interface)</h2>
+  <pre><code><span class="lang">java</span><span class="kw">public interface</span> <span class="type">JsonVersionMigration</span> {
+    <span class="type">String</span> <span class="fn">jsonType</span>();       <span class="cmt">// your type identifier string</span>
+    <span class="kw">int</span>    <span class="fn">fromVersion</span>();    <span class="cmt">// source version</span>
+    <span class="kw">int</span>    <span class="fn">toVersion</span>();      <span class="cmt">// must be fromVersion() + 1</span>
+    <span class="kw">void</span>   <span class="fn">migrate</span>(<span class="type">DocumentContext</span> doc);
+}</code></pre>
+
+  <h2 id="abstract">AbstractJsonVersionMigration (base class)</h2>
+  <p>Recommended. Auto-updates <code>$.version</code> after your changes. You only implement <code>applyChanges(doc)</code>.</p>
+  <pre><code><span class="lang">java</span><span class="kw">public abstract class</span> <span class="type">AbstractJsonVersionMigration</span>
+        <span class="kw">implements</span> <span class="type">JsonVersionMigration</span> {
+
+    <span class="kw">public final void</span> <span class="fn">migrate</span>(<span class="type">DocumentContext</span> doc) {
+        <span class="fn">applyChanges</span>(doc);
+        doc.<span class="fn">put</span>(<span class="str">"$"</span>, <span class="str">"version"</span>, String.<span class="fn">valueOf</span>(<span class="fn">toVersion</span>()));
+    }
+
+    <span class="kw">protected abstract void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc);
+}</code></pre>
+
+  <h2 id="registry">JsonMigrationRegistry</h2>
+  <p>Auto-discovers migrations, validates chains, provides lookup.</p>
+  <table>
+    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>init()</code></td><td>Index + validate. Called automatically by Spring, or manually.</td></tr>
+      <tr><td><code>getLatestVersion(type)</code></td><td>Highest version for a type (default: 1).</td></tr>
+      <tr><td><code>getRegisteredTypes()</code></td><td>All types that have migrations.</td></tr>
+      <tr><td><code>getMigrationChain(type, from)</code></td><td>Ordered list of steps from <code>from</code> to latest.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="service">JsonMigrationService</h2>
+  <p>The public API. This is what you inject.</p>
+  <table>
+    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>migrateToLatest(type, json)</code></td><td>Migrate to the latest version. Returns unchanged if already latest.</td></tr>
+      <tr><td><code>migrateToVersion(type, json, target)</code></td><td>Migrate to a specific version (not necessarily latest).</td></tr>
+      <tr><td><code>needsMigration(type, json)</code></td><td>Check if migration is needed without doing it.</td></tr>
+      <tr><td><code>getCurrentVersion(json)</code></td><td>Read the version number from a JSON string.</td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+
+  <!-- RECIPES -->
+  <h2 id="add-field">Recipe: Add a Field</h2>
+  <p><span class="tag green">SAFE</span> Non-breaking. Old consumers ignore unknown fields.</p>
+  <pre><code><span class="lang">java</span><span class="kw">protected void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc) {
+    doc.<span class="fn">put</span>(<span class="str">"$.fields"</span>, <span class="str">"gateway_mode"</span>, <span class="str">"live"</span>);
+}</code></pre>
+
+  <h2 id="remove-field">Recipe: Remove a Field</h2>
+  <p><span class="tag orange">BREAKING</span> Ensure no code reads this field first.</p>
+  <pre><code><span class="lang">java</span><span class="kw">protected void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc) {
+    <span class="kw">try</span> { doc.<span class="fn">delete</span>(<span class="str">"$.fields.legacy_token"</span>); }
+    <span class="kw">catch</span> (<span class="type">Exception</span> ignored) {}
+}</code></pre>
+
+  <h2 id="rename-field">Recipe: Rename a Field</h2>
+  <p><span class="tag orange">BREAKING</span> Copy to new key, then delete old.</p>
+  <pre><code><span class="lang">java</span><span class="kw">protected void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc) {
+    <span class="type">Object</span> val = doc.<span class="fn">read</span>(<span class="str">"$.fields.key_id"</span>);
+    <span class="kw">if</span> (val != <span class="kw">null</span>) {
+        doc.<span class="fn">put</span>(<span class="str">"$.fields"</span>, <span class="str">"api_key_id"</span>, val);
+        doc.<span class="fn">delete</span>(<span class="str">"$.fields.key_id"</span>);
+    }
+}</code></pre>
+
+  <h2 id="restructure">Recipe: Restructure / Nest</h2>
+  <p><span class="tag purple">ADVANCED</span> Move flat fields into a nested object.</p>
+  <pre><code><span class="lang">java</span><span class="kw">protected void</span> <span class="fn">applyChanges</span>(<span class="type">DocumentContext</span> doc) {
+    <span class="type">Object</span> clientId = doc.<span class="fn">read</span>(<span class="str">"$.fields.client_id"</span>);
+    <span class="type">Object</span> secret   = doc.<span class="fn">read</span>(<span class="str">"$.fields.client_secret"</span>);
+
+    <span class="type">Map</span>&lt;<span class="type">String</span>, <span class="type">Object</span>&gt; oauth = <span class="kw">new</span> <span class="type">LinkedHashMap</span>&lt;&gt;();
+    <span class="kw">if</span> (clientId != <span class="kw">null</span>) oauth.<span class="fn">put</span>(<span class="str">"client_id"</span>, clientId);
+    <span class="kw">if</span> (secret != <span class="kw">null</span>)   oauth.<span class="fn">put</span>(<span class="str">"client_secret"</span>, secret);
+
+    doc.<span class="fn">put</span>(<span class="str">"$.fields"</span>, <span class="str">"oauth"</span>, oauth);
+    doc.<span class="fn">delete</span>(<span class="str">"$.fields.client_id"</span>);
+    doc.<span class="fn">delete</span>(<span class="str">"$.fields.client_secret"</span>);
+}</code></pre>
+
+  <hr>
+
+  <!-- GUIDES -->
+  <h2 id="spring-boot">Spring Boot Usage</h2>
+  <p>Just add the dependency. The auto-configuration creates <code>JsonMigrationRegistry</code> and <code>JsonMigrationService</code> beans. All <code>JsonVersionMigration</code> <code>@Component</code> beans are auto-discovered.</p>
+  <p>No <code>@EnableXxx</code> annotation needed.</p>
+
+  <h2 id="non-spring">Non-Spring Usage</h2>
+  <pre><code><span class="lang">java</span><span class="kw">var</span> registry = <span class="kw">new</span> <span class="type">JsonMigrationRegistry</span>(<span class="type">List</span>.<span class="fn">of</span>(
+    <span class="kw">new</span> <span class="type">CredentialV1ToV2</span>(),
+    <span class="kw">new</span> <span class="type">CredentialV2ToV3</span>()
+));
+registry.<span class="fn">init</span>();
+
+<span class="kw">var</span> service = <span class="kw">new</span> <span class="type">JsonMigrationService</span>(registry);
+<span class="type">String</span> migrated = service.<span class="fn">migrateToLatest</span>(<span class="str">"CREDENTIAL"</span>, rawJson);</code></pre>
+
+  <h2 id="custom-path">Custom Version Path</h2>
+  <p>By default, the version is read from <code>$.version</code>. Override it:</p>
+  <pre><code><span class="lang">java</span><span class="cmt">// Read version from $.schema_version instead</span>
+<span class="kw">var</span> service = <span class="kw">new</span> <span class="type">JsonMigrationService</span>(registry, <span class="str">"$.schema_version"</span>);</code></pre>
+  <div class="callout warn">
+    <strong>Important</strong>
+    When using a custom path, your migration classes must write to the same path in their <code>migrate()</code> method. If you extend <code>AbstractJsonVersionMigration</code>, it always writes to <code>$.version</code>. Implement the interface directly for custom paths.
+  </div>
+
+  <h2 id="naming">Naming Convention</h2>
+  <pre><code><span class="lang">tree</span>src/main/java/com/yourcompany/migration/
+<span class="cmt">|--</span> credential/
+<span class="cmt">|   |--</span> <span class="field">CredentialV1ToV2.java</span>
+<span class="cmt">|   |--</span> <span class="field">CredentialV2ToV3.java</span>
+<span class="cmt">|--</span> branding/
+<span class="cmt">|   |--</span> <span class="field">BrandingV1ToV2.java</span>
+<span class="cmt">|--</span> <span class="type">JsonTypes.java</span>            <span class="cmt"># String constants</span></code></pre>
+  <p>Pattern: <code>{Type}V{from}ToV{to}.java</code> in package <code>migration/{type}/</code></p>
+
+  <h2 id="version-format">Version Format</h2>
+  <table>
+    <thead><tr><th>JSON value</th><th>Parsed as</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>"1.0"</code></td><td>1</td><td>Legacy dot format &mdash; major part</td></tr>
+      <tr><td><code>"3"</code></td><td>3</td><td>Integer string</td></tr>
+      <tr><td><code>5</code> (number)</td><td>5</td><td>Native JSON number</td></tr>
+      <tr><td><code>null</code> / missing</td><td>1</td><td>Treated as v1</td></tr>
+      <tr><td><code>"abc"</code></td><td>1</td><td>Warning logged, defaults to v1</td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+
+  <!-- RULES -->
+  <h2 id="rules">Rules &amp; Constraints</h2>
+  <div class="card-grid">
+    <div class="card"><h4>Sequential Only</h4><p><code>toVersion()</code> must equal <code>fromVersion() + 1</code>. No skipping.</p></div>
+    <div class="card"><h4>No Gaps</h4><p>Every version in the chain must be covered. Gaps = startup failure.</p></div>
+    <div class="card"><h4>One Step Per Class</h4><p>Each class handles exactly one transition.</p></div>
+    <div class="card"><h4>Must Be Discoverable</h4><p>Spring: annotate with <code>@Component</code>. Non-Spring: pass to registry constructor.</p></div>
+    <div class="card"><h4>Types Are Independent</h4><p><code>"CREDENTIAL"</code> and <code>"BRANDING"</code> have separate chains. No interference.</p></div>
+    <div class="card"><h4>Null-Safe</h4><p>Null/blank JSON returns as-is. No exceptions.</p></div>
+  </div>
+
+  <!-- TESTING -->
+  <h2 id="testing">Testing Migrations</h2>
+  <pre><code><span class="lang">java</span><span class="ann">@Test</span>
+<span class="kw">void</span> <span class="fn">testV1ToV2</span>() {
+    <span class="type">CredentialV1ToV2</span> migration = <span class="kw">new</span> <span class="type">CredentialV1ToV2</span>();
+
+    <span class="type">String</span> v1 = <span class="str">"""
+        {"version":"1.0","fields":{"key_id":"rzp_123"}}
+        """</span>;
+
+    <span class="type">DocumentContext</span> doc = <span class="type">JsonPath</span>.<span class="fn">parse</span>(v1);
+    migration.<span class="fn">migrate</span>(doc);
+
+    assertThat(doc.<span class="fn">read</span>(<span class="str">"$.version"</span>, <span class="type">String</span>.<span class="kw">class</span>)).<span class="fn">isEqualTo</span>(<span class="str">"2"</span>);
+    assertThat(doc.<span class="fn">read</span>(<span class="str">"$.fields.gateway_mode"</span>, <span class="type">String</span>.<span class="kw">class</span>)).<span class="fn">isEqualTo</span>(<span class="str">"live"</span>);
+}</code></pre>
+
+  <p>For full chain testing:</p>
+  <pre><code><span class="lang">java</span><span class="ann">@Test</span>
+<span class="kw">void</span> <span class="fn">testFullChain</span>() {
+    <span class="kw">var</span> registry = <span class="kw">new</span> <span class="type">JsonMigrationRegistry</span>(<span class="type">List</span>.<span class="fn">of</span>(
+        <span class="kw">new</span> <span class="type">CredentialV1ToV2</span>(), <span class="kw">new</span> <span class="type">CredentialV2ToV3</span>()));
+    registry.<span class="fn">init</span>();
+    <span class="kw">var</span> service = <span class="kw">new</span> <span class="type">JsonMigrationService</span>(registry);
+
+    <span class="type">String</span> result = service.<span class="fn">migrateToLatest</span>(<span class="str">"CREDENTIAL"</span>, v1Json);
+    <span class="cmt">// assert on the final state</span>
+}</code></pre>
+
+  <!-- FAQ -->
+  <h2 id="faq">FAQ</h2>
+
+  <h3>What if the chain has a gap?</h3>
+  <p>The app fails to start with <code>IllegalStateException</code>. This is intentional.</p>
+
+  <h3>Does it modify the database?</h3>
+  <p>No. Migration is read-only (in memory). Write back explicitly if needed.</p>
+
+  <h3>Can I inject Spring beans into migrations?</h3>
+  <p>Yes. Migrations are <code>@Component</code> beans. But keep them simple — prefer pure JSON transforms.</p>
+
+  <h3>What about performance?</h3>
+  <p>Near-zero for up-to-date JSON (short-circuit on version check). A few microseconds per step for old JSON.</p>
+
+  <h3>Can two types share a migration?</h3>
+  <p>No. Each migration belongs to one type. Write separate classes if two types need the same change.</p>
+
+  <h3>What Java/Spring versions are required?</h3>
+  <p>Java 17+. Spring Boot 3.x (optional). Also works without Spring.</p>
+
+  <hr>
+  <p style="text-align:center; color: var(--text-muted); font-size: 12px; margin-top: 40px;">
+    json-version-migrator v1.0.0 &middot; MIT License &middot; Simplotel
+  </p>
+
+</main>
+</div>
+
+<script>
+  // Copy button
+  function copyCode(btn) {
+    const code = btn.parentElement.querySelector('code');
+    const text = code.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    });
+  }
+
+  // Active sidebar link
+  const sections = document.querySelectorAll('h2[id]');
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  function setActive() {
+    let current = '';
+    sections.forEach(s => { if (s.getBoundingClientRect().top < 120) current = s.id; });
+    links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + current));
+  }
+  window.addEventListener('scroll', setActive);
+  setActive();
+
+  // Smooth scroll
+  links.forEach(l => l.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelector(l.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+  }));
+</script>
+</body>
+</html>
