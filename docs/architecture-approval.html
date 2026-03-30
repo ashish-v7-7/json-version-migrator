@@ -416,8 +416,206 @@
     </svg>
   </div>
 
+  <!-- ===== INPUT VALIDATION DETAIL ===== -->
+  <h2><span class="num">5</span> Input Validation — Detailed Flow</h2>
+  <p>
+    Strict version + schema validation for the <b>write path</b>. Two modes:
+    <code>validateInput()</code> (must be latest) and <code>validateInputAnyVersion()</code> (any version with a registered schema).
+  </p>
+
+  <h3>validateInput() — Latest Version Only</h3>
+  <div class="diagram">
+    <div class="diagram-title">validateInput() / validateInputOrThrow() — 5-Step Decision Waterfall</div>
+    <svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Start -->
+      <rect x="370" y="15" width="160" height="40" rx="20" fill="#1c2129" stroke="#d29922" stroke-width="2"/>
+      <text x="450" y="40" text-anchor="middle" fill="#d29922" font-size="12" font-weight="600">Input JSON</text>
+      <line x1="450" y1="55" x2="450" y2="80" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a)"/>
+
+      <!-- Step 1 -->
+      <polygon points="450,80 540,110 450,140 360,110" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="450" y="107" text-anchor="middle" fill="#e3b341" font-size="10" font-weight="600">null / blank?</text>
+      <line x1="540" y1="110" x2="670" y2="110" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="600" y="103" text-anchor="middle" fill="#f85149" font-size="9">yes</text>
+      <rect x="670" y="95" width="180" height="30" rx="6" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="760" y="115" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">MISSING_REQUIRED_FIELD</text>
+      <line x1="450" y1="140" x2="450" y2="165" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="435" y="156" fill="#3fb950" font-size="9">no</text>
+
+      <!-- Step 2 -->
+      <polygon points="450,165 545,195 450,225 355,195" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="450" y="192" text-anchor="middle" fill="#e3b341" font-size="10" font-weight="600">$.version exists?</text>
+      <line x1="545" y1="195" x2="670" y2="195" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="600" y="188" text-anchor="middle" fill="#f85149" font-size="9">no</text>
+      <rect x="670" y="180" width="180" height="30" rx="6" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="760" y="200" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">VERSION_MISSING</text>
+      <line x1="450" y1="225" x2="450" y2="250" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="435" y="241" fill="#3fb950" font-size="9">yes</text>
+
+      <!-- Step 3 -->
+      <polygon points="450,250 540,280 450,310 360,280" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="450" y="277" text-anchor="middle" fill="#e3b341" font-size="10" font-weight="600">parseable?</text>
+      <line x1="540" y1="280" x2="670" y2="280" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="600" y="273" text-anchor="middle" fill="#f85149" font-size="9">no</text>
+      <rect x="670" y="265" width="180" height="30" rx="6" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="760" y="285" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">VERSION_UNPARSEABLE</text>
+      <line x1="450" y1="310" x2="450" y2="335" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="435" y="326" fill="#3fb950" font-size="9">yes</text>
+
+      <!-- Step 4 -->
+      <polygon points="450,335 545,365 450,395 355,365" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="450" y="360" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">&lt;= latest</text>
+      <text x="450" y="373" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">AND == latest?</text>
+      <line x1="545" y1="365" x2="670" y2="365" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="600" y="358" text-anchor="middle" fill="#f85149" font-size="9">no</text>
+      <rect x="670" y="345" width="180" height="40" rx="6" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="760" y="363" text-anchor="middle" fill="#f85149" font-size="9" font-weight="600">VERSION_UNKNOWN</text>
+      <text x="760" y="378" text-anchor="middle" fill="#f85149" font-size="9" font-weight="600">VERSION_NOT_LATEST</text>
+      <line x1="450" y1="395" x2="450" y2="415" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="435" y="408" fill="#3fb950" font-size="9">yes</text>
+
+      <!-- Step 5 -->
+      <rect x="370" y="415" width="160" height="45" rx="8" fill="#1c2129" stroke="#39d2c0" stroke-width="2"/>
+      <text x="450" y="435" text-anchor="middle" fill="#39d2c0" font-size="11" font-weight="600">Schema Rules</text>
+      <text x="450" y="450" text-anchor="middle" fill="#8b949e" font-size="9">required / optional / forbidden</text>
+
+      <!-- Pass -->
+      <line x1="370" y1="437" x2="200" y2="437" stroke="#3fb950" stroke-width="2" marker-end="url(#ag)"/>
+      <text x="285" y="430" text-anchor="middle" fill="#3fb950" font-size="9">pass</text>
+      <rect x="80" y="420" width="120" height="35" rx="20" fill="#1c2129" stroke="#3fb950" stroke-width="2"/>
+      <text x="140" y="442" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="700">VALID</text>
+
+      <!-- Fail -->
+      <line x1="530" y1="437" x2="670" y2="437" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="600" y="430" text-anchor="middle" fill="#f85149" font-size="9">fail</text>
+      <rect x="670" y="422" width="180" height="30" rx="6" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="760" y="442" text-anchor="middle" fill="#f85149" font-size="10" font-weight="600">FIELD ERRORS</text>
+
+      <!-- Step labels on left -->
+      <text x="340" y="112" text-anchor="end" fill="#8b949e" font-size="9">Step 1</text>
+      <text x="340" y="197" text-anchor="end" fill="#8b949e" font-size="9">Step 2</text>
+      <text x="340" y="282" text-anchor="end" fill="#8b949e" font-size="9">Step 3</text>
+      <text x="340" y="367" text-anchor="end" fill="#8b949e" font-size="9">Step 4</text>
+      <text x="350" y="440" text-anchor="end" fill="#8b949e" font-size="9">Step 5</text>
+
+      <!-- Note -->
+      <rect x="80" y="475" width="770" height="30" rx="6" fill="#21262d" stroke="#30363d"/>
+      <text x="465" y="495" text-anchor="middle" fill="#8b949e" font-size="10">Stops at first failure. Each step returns a specific ErrorCode. Use validateInputOrThrow() to throw JsonValidationException.</text>
+    </svg>
+  </div>
+
+  <h3>validateInputAnyVersion() — Any Version With Schema</h3>
+  <div class="diagram">
+    <div class="diagram-title">validateInputAnyVersion() — Validates Against Declared Version's Schema</div>
+    <svg viewBox="0 0 900 350" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Input -->
+      <rect x="30" y="30" width="120" height="55" rx="8" fill="#1c2129" stroke="#d29922" stroke-width="2"/>
+      <text x="90" y="53" text-anchor="middle" fill="#d29922" font-size="11" font-weight="600">Input JSON</text>
+      <text x="90" y="70" text-anchor="middle" fill="#8b949e" font-size="9">{"version":"2", ...}</text>
+      <line x1="150" y1="57" x2="190" y2="57" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a)"/>
+
+      <!-- Read version -->
+      <rect x="190" y="35" width="120" height="45" rx="8" fill="#1c2129" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="250" y="55" text-anchor="middle" fill="#58a6ff" font-size="10" font-weight="600">Read $.version</text>
+      <text x="250" y="70" text-anchor="middle" fill="#8b949e" font-size="9">→ 2</text>
+      <line x1="310" y1="57" x2="350" y2="57" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a)"/>
+
+      <!-- Version checks -->
+      <polygon points="410,57 455,30 500,57 455,84" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="455" y="54" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">exists?</text>
+      <text x="455" y="67" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">parseable?</text>
+
+      <line x1="455" y1="84" x2="455" y2="115" stroke="#f85149" stroke-width="1" marker-end="url(#ar)"/>
+      <rect x="395" y="115" width="120" height="25" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="455" y="132" text-anchor="middle" fill="#f85149" font-size="9">VERSION error</text>
+
+      <line x1="500" y1="57" x2="540" y2="57" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+
+      <!-- Not future -->
+      <polygon points="600,57 640,30 680,57 640,84" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="640" y="54" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">&lt;=</text>
+      <text x="640" y="67" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">latest?</text>
+
+      <line x1="640" y1="84" x2="640" y2="115" stroke="#f85149" stroke-width="1" marker-end="url(#ar)"/>
+      <rect x="580" y="115" width="120" height="25" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="640" y="132" text-anchor="middle" fill="#f85149" font-size="9">VERSION_UNKNOWN</text>
+
+      <line x1="680" y1="57" x2="720" y2="57" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+
+      <!-- Schema lookup -->
+      <rect x="720" y="30" width="150" height="55" rx="8" fill="#1c2129" stroke="#bc8cff" stroke-width="2"/>
+      <text x="795" y="50" text-anchor="middle" fill="#bc8cff" font-size="10" font-weight="600">Schema Lookup</text>
+      <text x="795" y="65" text-anchor="middle" fill="#8b949e" font-size="9">getSchema("CRED", 2)</text>
+      <text x="795" y="78" text-anchor="middle" fill="#8b949e" font-size="9">→ CredentialV2Schema</text>
+
+      <!-- Schema found? -->
+      <line x1="795" y1="85" x2="795" y2="115" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a)"/>
+
+      <polygon points="795,115 845,140 795,165 745,140" fill="#1c2129" stroke="#e3b341" stroke-width="1.5"/>
+      <text x="795" y="144" text-anchor="middle" fill="#e3b341" font-size="9" font-weight="600">found?</text>
+
+      <line x1="745" y1="140" x2="650" y2="170" stroke="#f85149" stroke-width="1" marker-end="url(#ar)"/>
+      <text x="690" y="158" text-anchor="middle" fill="#f85149" font-size="8">no</text>
+      <rect x="580" y="165" width="130" height="25" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="645" y="182" text-anchor="middle" fill="#f85149" font-size="9">NO_SCHEMA_FOUND</text>
+
+      <line x1="795" y1="165" x2="795" y2="200" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ag)"/>
+      <text x="810" y="186" fill="#3fb950" font-size="8">yes</text>
+
+      <!-- Validate rules -->
+      <rect x="710" y="200" width="170" height="50" rx="8" fill="#1c2129" stroke="#39d2c0" stroke-width="2"/>
+      <text x="795" y="222" text-anchor="middle" fill="#39d2c0" font-size="11" font-weight="600">Validate V2 Rules</text>
+      <text x="795" y="238" text-anchor="middle" fill="#8b949e" font-size="9">required / optional / forbidden</text>
+
+      <!-- Pass -->
+      <line x1="710" y1="225" x2="600" y2="225" stroke="#3fb950" stroke-width="2" marker-end="url(#ag)"/>
+      <text x="655" y="218" text-anchor="middle" fill="#3fb950" font-size="9">pass</text>
+      <rect x="480" y="208" width="120" height="35" rx="20" fill="#1c2129" stroke="#3fb950" stroke-width="2"/>
+      <text x="540" y="230" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="700">VALID</text>
+
+      <!-- Fail -->
+      <line x1="795" y1="250" x2="795" y2="275" stroke="#f85149" stroke-width="1.5" marker-end="url(#ar)"/>
+      <rect x="720" y="275" width="150" height="25" rx="4" fill="rgba(248,81,73,0.1)" stroke="#f85149"/>
+      <text x="795" y="293" text-anchor="middle" fill="#f85149" font-size="10">FIELD ERRORS</text>
+
+      <!-- Key difference note -->
+      <rect x="30" y="270" width="420" height="65" rx="8" fill="#21262d" stroke="#58a6ff" stroke-width="1"/>
+      <text x="240" y="292" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">Key Difference from validateInput()</text>
+      <text x="240" y="310" text-anchor="middle" fill="#8b949e" font-size="10">Does NOT require latest version.</text>
+      <text x="240" y="325" text-anchor="middle" fill="#8b949e" font-size="10">Accepts v1, v2, v3... as long as a schema exists for that version.</text>
+    </svg>
+  </div>
+
+  <h3>Version Error Codes Summary</h3>
+  <table>
+    <thead><tr><th>Error Code</th><th>When it fires</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><code>VERSION_MISSING</code></td><td><code>$.version</code> field not present</td><td><code>{"fields": {...}}</code></td></tr>
+      <tr><td><code>VERSION_UNPARSEABLE</code></td><td>Version exists but not a number</td><td><code>{"version": "abc"}</code></td></tr>
+      <tr><td><code>VERSION_UNKNOWN</code></td><td>Version higher than latest known</td><td><code>{"version": "99"}</code> when latest is 4</td></tr>
+      <tr><td><code>VERSION_NOT_LATEST</code></td><td>Version is valid but not the latest (<code>validateInput</code> only)</td><td><code>{"version": "2"}</code> when latest is 4</td></tr>
+      <tr><td><code>NO_SCHEMA_FOUND</code></td><td>No schema registered for this version (<code>validateInputAnyVersion</code> only)</td><td>v2 JSON but no V2Schema defined</td></tr>
+      <tr><td><code>MISSING_REQUIRED_FIELD</code></td><td>Required field absent</td><td><code>$.fields.key_secret</code> missing</td></tr>
+      <tr><td><code>TYPE_MISMATCH</code></td><td>Field exists, wrong type</td><td><code>$.fields.key_id</code> is NUMBER, expected STRING</td></tr>
+      <tr><td><code>FORBIDDEN_FIELD_PRESENT</code></td><td>Deprecated field still present</td><td><code>$.fields.legacy_token</code> should be removed</td></tr>
+    </tbody>
+  </table>
+
+  <h3>When to Use Which</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Version Requirement</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td><code>validateInput()</code></td><td>Must be <b>latest</b></td><td>API writes — only accept current format</td></tr>
+      <tr><td><code>validateInputAnyVersion()</code></td><td>Must have a <b>registered schema</b></td><td>Accept any known version during rollout</td></tr>
+      <tr><td><code>validateInputForVersion()</code></td><td>Must be <b>exactly</b> the specified version</td><td>Expect a specific version from a specific client</td></tr>
+      <tr><td><code>validate()</code></td><td><b>No version check</b> — structure only</td><td>Read path — post-migration schema check</td></tr>
+    </tbody>
+  </table>
+
   <!-- ===== COMPONENT RELATIONSHIP ===== -->
-  <h2><span class="num">5</span> Component Relationship Diagram</h2>
+  <h2><span class="num">6</span> Component Relationship Diagram</h2>
 
   <div class="diagram">
     <div class="diagram-title">What You Write (green) vs What the Library Provides (blue/purple)</div>
@@ -499,7 +697,7 @@
   </div>
 
   <!-- ===== DECISION POINTS ===== -->
-  <h2><span class="num">6</span> Key Decision Points for Team Review</h2>
+  <h2><span class="num">7</span> Key Decision Points for Team Review</h2>
 
   <div class="info decision">
     <strong>Decision 1: Migration is read-only (lazy, on-demand)</strong>
@@ -537,7 +735,7 @@
   </div>
 
   <!-- ===== BENEFITS ===== -->
-  <h2><span class="num">7</span> Benefits</h2>
+  <h2><span class="num">8</span> Benefits</h2>
 
   <div class="info benefit">
     <strong>Zero Downtime Migrations</strong>
@@ -578,7 +776,7 @@
   </div>
 
   <!-- ===== RISKS ===== -->
-  <h2><span class="num">8</span> Risks &amp; Mitigations</h2>
+  <h2><span class="num">9</span> Risks &amp; Mitigations</h2>
 
   <table>
     <thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead>
@@ -612,7 +810,7 @@
   </table>
 
   <!-- ===== INTEGRATION EFFORT ===== -->
-  <h2><span class="num">9</span> Integration Effort</h2>
+  <h2><span class="num">10</span> Integration Effort</h2>
 
   <table>
     <thead><tr><th>Task</th><th>Effort</th><th>Files Changed</th></tr></thead>
