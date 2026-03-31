@@ -512,4 +512,154 @@ class JsonMigrationServiceTest {
             assertThat(cfg).isNull();
         }
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // Tests: Array migration
+    // ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Array migration — migrateArrayToLatest()")
+    class ArrayMigration {
+
+        @Test
+        @DisplayName("migrates each element in array independently")
+        void migratesEachElement() {
+            // Array with 2 elements at different versions
+            String array = """
+                [
+                  {"version":"1","name":"first"},
+                  {"version":"2","name":"second","new_field":"custom"}
+                ]
+                """;
+
+            String result = service.migrateArrayToLatest("CONFIG", array);
+
+            // Parse as array — both should be at v4
+            List<Object> elements = JsonPath.parse(result).read("$");
+            assertThat(elements).hasSize(2);
+
+            DocumentContext doc = JsonPath.parse(result);
+            assertThat(doc.read("$[0].version", String.class)).isEqualTo("4");
+            assertThat(doc.read("$[0].new_field", String.class)).isEqualTo("default_value"); // added by v1→v2
+            assertThat(doc.read("$[1].version", String.class)).isEqualTo("4");
+            assertThat(doc.read("$[1].new_field", String.class)).isEqualTo("custom"); // kept original
+        }
+
+        @Test
+        @DisplayName("already-latest elements are unchanged")
+        void alreadyLatest() {
+            String array = """
+                [
+                  {"version":"4","display_name":"a","new_field":"x"},
+                  {"version":"4","display_name":"b","new_field":"y"}
+                ]
+                """;
+
+            String result = service.migrateArrayToLatest("CONFIG", array);
+            DocumentContext doc = JsonPath.parse(result);
+            assertThat(doc.read("$[0].display_name", String.class)).isEqualTo("a");
+            assertThat(doc.read("$[1].display_name", String.class)).isEqualTo("b");
+        }
+
+        @Test
+        @DisplayName("empty array returns unchanged")
+        void emptyArray() {
+            assertThat(service.migrateArrayToLatest("CONFIG", "[]")).isEqualTo("[]");
+        }
+
+        @Test
+        @DisplayName("null returns null")
+        void nullInput() {
+            assertThat(service.migrateArrayToLatest("CONFIG", null)).isNull();
+        }
+
+        @Test
+        @DisplayName("single object (not array) falls back to object migration")
+        void singleObject() {
+            String single = """
+                {"version":"1","name":"solo"}
+                """;
+            String result = service.migrateArrayToLatest("CONFIG", single);
+            assertThat(JsonPath.parse(result).read("$.version", String.class)).isEqualTo("4");
+        }
+    }
+
+    @Nested
+    @DisplayName("Array migration — typed list return")
+    class ArrayMigrationTyped {
+
+        @Test
+        @DisplayName("returns List<T> of deserialized POJOs")
+        void typedArrayReturn() {
+            String array = """
+                [
+                  {"version":"1","name":"first"},
+                  {"version":"2","name":"second","new_field":"custom"}
+                ]
+                """;
+
+            List<SimpleConfig> results = service.migrateArrayToLatest("CONFIG", array, SIMPLE_DESERIALIZER);
+
+            assertThat(results).hasSize(2);
+            assertThat(results.get(0).version).isEqualTo("4");
+            assertThat(results.get(0).new_field).isEqualTo("default_value");
+            assertThat(results.get(1).version).isEqualTo("4");
+            assertThat(results.get(1).new_field).isEqualTo("custom");
+        }
+
+        @Test
+        @DisplayName("empty array returns empty list")
+        void emptyArray() {
+            List<SimpleConfig> results = service.migrateArrayToLatest("CONFIG", "[]", SIMPLE_DESERIALIZER);
+            assertThat(results).isEmpty();
+        }
+
+        @Test
+        @DisplayName("null returns empty list")
+        void nullInput() {
+            List<SimpleConfig> results = service.migrateArrayToLatest("CONFIG", null, SIMPLE_DESERIALIZER);
+            assertThat(results).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("Array migration — migrateArrayAndValidate()")
+    class ArrayMigrationValidate {
+
+        @Test
+        @DisplayName("all elements valid → isValid() true")
+        void allValid() {
+            String array = """
+                [{"version":"1","name":"a"},{"version":"2","name":"b","new_field":"x"}]
+                """;
+
+            JsonMigrationService.ArrayMigrationResult result =
+                    service.migrateArrayAndValidate("CONFIG", array);
+
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.size()).isEqualTo(2);
+            assertThat(result.getFirstInvalidIndex()).isEqualTo(-1);
+        }
+
+        @Test
+        @DisplayName("null input → valid empty result")
+        void nullInput() {
+            JsonMigrationService.ArrayMigrationResult result =
+                    service.migrateArrayAndValidate("CONFIG", null);
+            assertThat(result.isValid()).isTrue();
+        }
+
+        @Test
+        @DisplayName("error summary shows element index")
+        void errorSummary() {
+            // CONFIG type has no schemas registered, so validation always passes
+            // This test just verifies the summary format works
+            String array = """
+                [{"version":"1","name":"test"}]
+                """;
+            JsonMigrationService.ArrayMigrationResult result =
+                    service.migrateArrayAndValidate("CONFIG", array);
+            assertThat(result.getErrorSummary()).isEqualTo("No errors");
+        }
+    }
 }

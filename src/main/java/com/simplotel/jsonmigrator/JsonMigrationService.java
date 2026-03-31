@@ -9,7 +9,9 @@ import com.simplotel.jsonmigrator.validation.JsonValidationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The main entry point for migrating versioned JSON strings to the latest schema.
@@ -159,6 +161,182 @@ public class JsonMigrationService {
         }
         DocumentContext doc = JsonPath.using(JSON_PATH_CONFIG).parse(json);
         return readVersion(doc);
+    }
+
+    // ── Array migration (for JSON arrays of versioned objects) ──
+
+    /**
+     * Migrates each element in a JSON array to the latest version.
+     *
+     * <p>Use this when the DB column stores an <b>array</b> of versioned objects
+     * (e.g., refunds, split_payments), where each element has its own {@code $.version}.</p>
+     *
+     * <pre>{@code
+     * // DB column: [{"version":"1","amount":50}, {"version":"2","amount":30}]
+     * String migrated = migrationService.migrateArrayToLatest("REFUND", rawArrayJson);
+     * // Result: [{"version":"3","amount":50,...}, {"version":"3","amount":30,...}]
+     * }</pre>
+     *
+     * @param type the JSON document type (applied to each element)
+     * @param jsonArray the raw JSON array string from the database
+     * @return the migrated JSON array string, or the original if null/blank/empty
+     */
+    public String migrateArrayToLatest(String type, String jsonArray) {
+        if (jsonArray == null || jsonArray.isBlank()) {
+            return jsonArray;
+        }
+
+        Object parsed = Configuration.defaultConfiguration().jsonProvider().parse(jsonArray);
+        if (!(parsed instanceof List<?> list)) {
+            // Not an array — fall back to single-object migration
+            return migrateToLatest(type, jsonArray);
+        }
+
+        if (list.isEmpty()) {
+            return jsonArray;
+        }
+
+        List<String> migratedElements = new ArrayList<>(list.size());
+        for (Object element : list) {
+            String elementJson = Configuration.defaultConfiguration().jsonProvider().toJson(element);
+            migratedElements.add(migrateToLatest(type, elementJson));
+        }
+
+        return "[" + String.join(",", migratedElements) + "]";
+    }
+
+    /**
+     * Migrates each element in a JSON array and deserializes into a typed list.
+     *
+     * <pre>{@code
+     * List<RefundResponse> refunds = migrationService.migrateArrayToLatest(
+     *     "REFUND", rawArrayJson,
+     *     json -> objectMapper.readValue(json, RefundResponse.class));
+     * }</pre>
+     *
+     * @param type         the JSON document type
+     * @param jsonArray    the raw JSON array string
+     * @param deserializer function to convert each migrated element JSON → POJO
+     * @param <T>          the target element type
+     * @return list of deserialized POJOs (empty list if input is null/blank/empty)
+     */
+    public <T> List<T> migrateArrayToLatest(String type, String jsonArray, JsonDeserializer<T> deserializer) {
+        if (jsonArray == null || jsonArray.isBlank()) {
+            return List.of();
+        }
+
+        Object parsed = Configuration.defaultConfiguration().jsonProvider().parse(jsonArray);
+        if (!(parsed instanceof List<?> list)) {
+            // Single object — wrap in list
+            T single = migrateToLatest(type, jsonArray, deserializer);
+            return single != null ? List.of(single) : List.of();
+        }
+
+        if (list.isEmpty()) {
+            return List.of();
+        }
+
+        List<T> result = new ArrayList<>(list.size());
+        for (Object element : list) {
+            String elementJson = Configuration.defaultConfiguration().jsonProvider().toJson(element);
+            String migrated = migrateToLatest(type, elementJson);
+            result.add(deserializeOrThrow(migrated, deserializer));
+        }
+        return result;
+    }
+
+    /**
+     * Migrates each element in a JSON array, validates each, and returns combined results.
+     *
+     * <pre>{@code
+     * ArrayMigrationResult result = migrationService.migrateArrayAndValidate("REFUND", rawArrayJson);
+     * if (result.isValid()) {
+     *     String migratedArray = result.getJson();
+     * } else {
+     *     log.error("Element {} failed: {}", result.getFirstInvalidIndex(), result.getErrorSummary());
+     * }
+     * }</pre>
+     *
+     * @param type      the JSON document type
+     * @param jsonArray the raw JSON array string
+     * @return the array migration result
+     */
+    public ArrayMigrationResult migrateArrayAndValidate(String type, String jsonArray) {
+        if (jsonArray == null || jsonArray.isBlank()) {
+            return new ArrayMigrationResult(jsonArray, List.of(), true);
+        }
+
+        Object parsed = Configuration.defaultConfiguration().jsonProvider().parse(jsonArray);
+        if (!(parsed instanceof List<?> list) || list.isEmpty()) {
+            return new ArrayMigrationResult(jsonArray, List.of(), true);
+        }
+
+        List<MigrationResult> elementResults = new ArrayList<>(list.size());
+        boolean allValid = true;
+
+        for (Object element : list) {
+            String elementJson = Configuration.defaultConfiguration().jsonProvider().toJson(element);
+            MigrationResult result = migrateAndValidate(type, elementJson);
+            elementResults.add(result);
+            if (!result.isValid()) {
+                allValid = false;
+            }
+        }
+
+        // Rebuild the array JSON from migrated elements
+        List<String> migratedJsons = elementResults.stream()
+                .map(MigrationResult::getJson)
+                .toList();
+        String migratedArray = "[" + String.join(",", migratedJsons) + "]";
+
+        return new ArrayMigrationResult(migratedArray, elementResults, allValid);
+    }
+
+    /**
+     * Result of migrating + validating a JSON array. Each element has its own result.
+     */
+    public static class ArrayMigrationResult {
+        private final String json;
+        private final List<MigrationResult> elementResults;
+        private final boolean valid;
+
+        public ArrayMigrationResult(String json, List<MigrationResult> elementResults, boolean valid) {
+            this.json = json;
+            this.elementResults = elementResults;
+            this.valid = valid;
+        }
+
+        /** The migrated JSON array string. */
+        public String getJson() { return json; }
+
+        /** Per-element migration + validation results. */
+        public List<MigrationResult> getElementResults() { return elementResults; }
+
+        /** True if ALL elements passed validation. */
+        public boolean isValid() { return valid; }
+
+        /** Total number of elements. */
+        public int size() { return elementResults.size(); }
+
+        /** Index of the first invalid element, or -1 if all valid. */
+        public int getFirstInvalidIndex() {
+            for (int i = 0; i < elementResults.size(); i++) {
+                if (!elementResults.get(i).isValid()) return i;
+            }
+            return -1;
+        }
+
+        /** Combined error summary across all elements. */
+        public String getErrorSummary() {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < elementResults.size(); i++) {
+                MigrationResult r = elementResults.get(i);
+                if (!r.isValid()) {
+                    sb.append(String.format("[element %d] %s\n", i, r.getValidation().getErrorSummary()));
+                }
+            }
+            return sb.isEmpty() ? "No errors" : sb.toString().trim();
+        }
     }
 
     // ── Migration + Validation (combined) ──
