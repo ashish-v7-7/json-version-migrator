@@ -420,6 +420,110 @@ public class JsonValidationService {
                                     rule.getJsonPath()));
                 }
             }
+            case EACH_ELEMENT -> {
+                validateArrayElements(doc, rule, builder);
+            }
+        }
+    }
+
+    private void validateArrayElements(DocumentContext doc, JsonFieldRule rule, JsonValidationResult.Builder builder) {
+        Object value = doc.read(rule.getJsonPath());
+
+        // Array must exist
+        if (value == null) {
+            builder.addError(ErrorCode.MISSING_REQUIRED_FIELD, rule.getJsonPath(),
+                    String.format("Required array '%s' is missing or null", rule.getJsonPath()));
+            return;
+        }
+
+        // Must be an array/list
+        if (!(value instanceof Collection<?> array)) {
+            builder.addError(ErrorCode.TYPE_MISMATCH, rule.getJsonPath(),
+                    String.format("Field '%s' expected ARRAY but got %s",
+                            rule.getJsonPath(), value.getClass().getSimpleName()));
+            return;
+        }
+
+        // Validate each element against sub-rules
+        int index = 0;
+        for (Object element : array) {
+            if (!(element instanceof Map)) {
+                builder.addError(ErrorCode.TYPE_MISMATCH,
+                        rule.getJsonPath() + "[" + index + "]",
+                        String.format("Element at %s[%d] expected OBJECT but got %s",
+                                rule.getJsonPath(), index, element.getClass().getSimpleName()));
+                index++;
+                continue;
+            }
+
+            // Parse the element as its own DocumentContext so sub-rules work with $.fieldName
+            String elementJson = Configuration.defaultConfiguration().jsonProvider().toJson(element);
+            DocumentContext elementDoc = JsonPath.using(JSON_PATH_CONFIG).parse(elementJson);
+
+            for (JsonFieldRule subRule : rule.getElementRules()) {
+                validateFieldWithContext(elementDoc, subRule, builder,
+                        rule.getJsonPath() + "[" + index + "]");
+            }
+            index++;
+        }
+    }
+
+    /**
+     * Same as validateField but prefixes error paths with the array context
+     * (e.g., "$.paymentAccountInfo[0].status" instead of just "$.status").
+     */
+    private void validateFieldWithContext(DocumentContext doc, JsonFieldRule rule,
+                                          JsonValidationResult.Builder builder, String contextPath) {
+        Object value = doc.read(rule.getJsonPath());
+        // Build the full path: $.paymentAccountInfo[0] + .status → $.paymentAccountInfo[0].status
+        String fieldName = rule.getJsonPath().startsWith("$.") ? rule.getJsonPath().substring(2) : rule.getJsonPath();
+        String fullPath = contextPath + "." + fieldName;
+
+        switch (rule.getPresence()) {
+            case REQUIRED -> {
+                if (value == null) {
+                    builder.addError(ErrorCode.MISSING_REQUIRED_FIELD, fullPath,
+                            String.format("Required field '%s' is missing or null", fullPath));
+                } else {
+                    checkTypeWithPath(value, rule, builder, fullPath);
+                }
+            }
+            case OPTIONAL -> {
+                if (value != null) {
+                    checkTypeWithPath(value, rule, builder, fullPath);
+                }
+            }
+            case FORBIDDEN -> {
+                if (value != null) {
+                    builder.addError(ErrorCode.FORBIDDEN_FIELD_PRESENT, fullPath,
+                            String.format("Forbidden field '%s' still exists", fullPath));
+                }
+            }
+            case EACH_ELEMENT -> {
+                // Nested arrays — recurse
+                validateArrayElements(doc, rule, builder);
+            }
+        }
+    }
+
+    private void checkTypeWithPath(Object value, JsonFieldRule rule,
+                                    JsonValidationResult.Builder builder, String fullPath) {
+        if (rule.getExpectedType() == FieldType.ANY) return;
+
+        boolean typeMatch = switch (rule.getExpectedType()) {
+            case STRING  -> value instanceof String;
+            case NUMBER  -> value instanceof Number;
+            case BOOLEAN -> value instanceof Boolean;
+            case OBJECT  -> value instanceof Map;
+            case ARRAY   -> value instanceof Collection;
+            case ANY     -> true;
+        };
+
+        if (!typeMatch) {
+            builder.addError(ErrorCode.TYPE_MISMATCH, fullPath,
+                    String.format("Field '%s' expected %s but got %s (%s)",
+                            fullPath, rule.getExpectedType(),
+                            value.getClass().getSimpleName(), truncateValue(value)));
         }
     }
 
